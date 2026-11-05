@@ -91,6 +91,7 @@ ghwatch poll [--once]
 ghwatch ensure-poller | stop-poller | restart-poller
 ghwatch forget-consumer NAME
 ghwatch track OWNER/NAME... -c NAME | untrack OWNER/NAME... | tracked
+ghwatch scan-transcripts [--follow] [--exclude-session ID] [--from-start]
 ```
 
 ## Storage
@@ -100,6 +101,7 @@ All runtime state lives in `$GHWATCH_HOME`, which defaults to `~/.ghwatch`:
 - `ghwatch.db`: SQLite in WAL mode, with the tables `events`, `consumers`, `claims`, `tracked_repos` and `state`
 - `poller.lock`: held by the running poller
 - `poller.log`: poller output
+- `transcript-scan.json`: the transcript scanner's position
 
 Events older than 30 days, and their claims, are pruned on every poll.
 Conditional requests (ETag and If-Modified-Since) mean an unchanged poll does not count against the rate limit.
@@ -110,6 +112,12 @@ A maintainer Claude session owns this project. It watches this repo and scans ot
 
 ```bash
 gh issue create -R claude-voxar/ghwatch -t "<summary>" -b "<what you ran, what happened, what you expected>"
+```
+
+The maintainer also runs a scanner over other sessions' transcripts, which reports failing `ghwatch` commands and `GHWATCH-STALE` notices without anyone filing an issue:
+
+```bash
+ghwatch scan-transcripts --follow --exclude-session <maintainer-session-id> 2>&1
 ```
 
 ## Maintenance
