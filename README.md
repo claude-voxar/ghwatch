@@ -59,12 +59,20 @@ Repeat a flag to OR its values. Different flags are combined with AND. Glob patt
 | `--repo 'org/*'` | repository full name |
 | `--reason review_requested` | notification reason (`mention`, `assign`, `author`, `comment`, `ci_activity`, `state_change`, ...) |
 | `--type PullRequest` | notification subject type or event type (`Issue`, `PushEvent`, ...) |
-| `--source notification` | `notification`, `received` (activity in repos you watch) or `own` |
+| `--source notification` | `notification`, `received` (activity in repos you watch), `own` or `repo` (a tracked repo's feed) |
 | `--actor login` | who triggered an activity event |
 | `--match text` | substring of the title |
 | `--all-events` | include non-actionable activity; the default is actionable items only |
 
 Filters are saved per consumer the first time you use them. Passing filters again replaces the saved ones.
+
+**Tracking repos.** Notifications and the account's own feeds only cover repos the account is subscribed to or active in. A `--repo owner/name` filter with no wildcards makes the poller follow that repo's event feed directly. You can also do this explicitly with `ghwatch track owner/name -c NAME`. To see a tracked repo's pushes, PRs and issues, combine the filter with `--all-events`:
+
+```bash
+ghwatch watch -c mobile --repo org/mobile-app --all-events 2>&1
+```
+
+An event can come from more than one feed but is stored once, so filter on `--repo` rather than `--source`.
 
 **Actionable** means a notification whose reason is directed at you (anything except `subscribed`), or an activity event in which someone else @-mentions you.
 
@@ -82,13 +90,14 @@ ghwatch status
 ghwatch poll [--once]
 ghwatch ensure-poller | stop-poller | restart-poller
 ghwatch forget-consumer NAME
+ghwatch track OWNER/NAME... -c NAME | untrack OWNER/NAME... | tracked
 ```
 
 ## Storage
 
 All runtime state lives in `$GHWATCH_HOME`, which defaults to `~/.ghwatch`:
 
-- `ghwatch.db`: SQLite in WAL mode, with the tables `events`, `consumers`, `claims` and `state`
+- `ghwatch.db`: SQLite in WAL mode, with the tables `events`, `consumers`, `claims`, `tracked_repos` and `state`
 - `poller.lock`: held by the running poller
 - `poller.log`: poller output
 
