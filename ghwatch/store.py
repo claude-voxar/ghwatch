@@ -37,6 +37,11 @@ CREATE TABLE IF NOT EXISTS consumers (
   created_at TEXT NOT NULL,
   last_seen  TEXT
 );
+CREATE TABLE IF NOT EXISTS tracked_repos (
+  repo       TEXT PRIMARY KEY,                    -- owner/name, lower-case
+  added_by   TEXT NOT NULL,                       -- consumer that asked for it
+  added_at   TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS claims (
   event_id   TEXT PRIMARY KEY,                    -- at most one owner per item
   consumer   TEXT NOT NULL,
