@@ -7,6 +7,7 @@ so the poller survives individual sessions coming and going.
 import fcntl
 import logging
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -48,6 +49,36 @@ def is_running(home):
         return True
     fh.close()
     return False
+
+
+def running_pid(home):
+    """PID of the running poller, or None if no poller holds the lock."""
+    if not is_running(home):
+        return None
+    try:
+        with open(lock_path(home)) as fh:
+            return int(fh.read().strip())
+    except (OSError, ValueError):
+        return None
+
+
+def stop(home, timeout=15.0, sleep=time.sleep):
+    """SIGTERM the running poller and wait for it to release the lock.
+
+    Returns True if no poller is running afterwards.
+    """
+    pid = running_pid(home)
+    if pid is None:
+        return not is_running(home)
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    waited = 0.0
+    while is_running(home) and waited < timeout:
+        sleep(0.2)
+        waited += 0.2
+    return not is_running(home)
 
 
 def start_detached(home):

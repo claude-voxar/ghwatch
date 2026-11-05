@@ -147,5 +147,31 @@ class LockTest(unittest.TestCase):
             self.assertFalse(poller.is_running(home))
 
 
+class StopTest(unittest.TestCase):
+    def test_stop_terminates_a_real_poller_process(self):
+        with tempfile.TemporaryDirectory() as home:
+            code = textwrap.dedent(f"""
+                import sys, time; sys.path.insert(0, {os.getcwd()!r})
+                from ghwatch import poller
+                lock = poller.acquire_lock({home!r})
+                print("ready", flush=True)
+                time.sleep(60)
+            """)
+            proc = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE, text=True)
+            try:
+                self.assertEqual(proc.stdout.readline().strip(), "ready")
+                self.assertEqual(poller.running_pid(home), proc.pid)
+                self.assertTrue(poller.stop(home, timeout=5))
+                self.assertIsNone(poller.running_pid(home))
+                self.assertIsNotNone(proc.wait(timeout=5))
+            finally:
+                proc.kill()
+
+    def test_stop_when_nothing_running(self):
+        with tempfile.TemporaryDirectory() as home:
+            self.assertIsNone(poller.running_pid(home))
+            self.assertTrue(poller.stop(home))
+
+
 if __name__ == "__main__":
     unittest.main()
