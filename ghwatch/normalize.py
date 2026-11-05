@@ -42,24 +42,43 @@ def notification_row(n, fetched_at):
     }
 
 
+def _subject(p):
+    """(noun, number, title or None, html url or None) of the PR/issue an event is about.
+
+    GitHub's events API may send trimmed objects with only url/id/number, so
+    title and html_url are optional and the web URL is derived when missing.
+    """
+    if "pull_request" in p:
+        obj, noun = p["pull_request"] or {}, "PR"
+    else:
+        obj = p.get("issue") or {}
+        noun = "PR" if "pull_request" in obj else "issue"
+    return noun, obj.get("number"), obj.get("title"), obj.get("html_url") or html_url(obj.get("url"))
+
+
+def _label(noun, number, title):
+    return f"{noun} #{number}" + (f" {title}" if title else "")
+
+
 def describe_event(e):
     """Return (one-line summary, html url or None) for an activity event."""
     p = e.get("payload") or {}
     t = e.get("type")
-    obj = p.get("pull_request") or p.get("issue") or {}
+    noun, number, title, url = _subject(p)
     if t == "PushEvent":
         n = p.get("size") or len(p.get("commits") or [])
         branch = (p.get("ref") or "").replace("refs/heads/", "")
-        return f"pushed {n} commit(s) to {branch}", None
+        return (f"pushed {n} commit(s) to {branch}" if n else f"pushed to {branch}"), None
     if t in ("IssueCommentEvent", "PullRequestReviewCommentEvent", "CommitCommentEvent"):
-        summary = f"commented on #{obj.get('number', '')} {obj.get('title', '')}".strip()
-        return summary, (p.get("comment") or {}).get("html_url")
+        comment_url = (p.get("comment") or {}).get("html_url")
+        if number is None:
+            return "commented", comment_url
+        return f"commented on {_label(noun, number, title)}", comment_url or url
     if t == "PullRequestReviewEvent":
         review = p.get("review") or {}
-        return (f"reviewed ({review.get('state')}) #{obj.get('number')} {obj.get('title')}",
-                review.get("html_url"))
-    if obj:
-        return f"{p.get('action', '')} #{obj.get('number')} {obj.get('title')}".strip(), obj.get("html_url")
+        return f"reviewed ({review.get('state')}) {_label(noun, number, title)}", review.get("html_url") or url
+    if number is not None:
+        return f"{p.get('action', '')} {_label(noun, number, title)}".strip(), url
     if t in ("CreateEvent", "DeleteEvent"):
         verb = "created" if t == "CreateEvent" else "deleted"
         return f"{verb} {p.get('ref_type')} {p.get('ref') or ''}".strip(), None
