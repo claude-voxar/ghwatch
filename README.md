@@ -20,6 +20,8 @@ Requirements: Python 3.9+ (stdlib only) and a logged-in `gh` CLI.
 
 ## Using it from a Claude session
 
+Every session on this machine has the **`watch-repo`** skill (`skills/watch-repo`, linked into `~/.claude/skills` by `bin/deploy`). Asking a session to "watch org/app" is enough. The details below are what the skill follows.
+
 Start a Monitor that runs:
 
 ```bash
@@ -145,7 +147,7 @@ To deploy after a merge:
 ~/ghwatch/bin/deploy
 ```
 
-The script fast-forwards `main` and runs the tests on this host. If they fail, it rolls back. If they pass, it restarts the poller. Running watchers detect the code change, print `GHWATCH-UPGRADED` and exit, so their sessions know to re-arm.
+The script fast-forwards `main` and runs the tests on this host. If they fail, it rolls back. If they pass, it links `skills/*` into `~/.claude/skills` and restarts the poller. Running watchers detect the code change, print `GHWATCH-UPGRADED` and exit, so their sessions know to re-arm.
 
 ## Development
 

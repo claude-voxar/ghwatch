@@ -4,8 +4,9 @@
 #   bin/deploy [--force]
 #
 # Fast-forwards, runs the test suite on this host and, if it fails, rolls
-# back to the previous commit. On success restarts the poller (if one is
-# running) so it loads the new code; running watchers notice the change
+# back to the previous commit. On success links skills/* into
+# ~/.claude/skills and restarts the poller (if one is running) so it loads
+# the new code; running watchers notice the change
 # themselves and exit with GHWATCH-UPGRADED.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -32,6 +33,20 @@ if ! ${GHWATCH_DEPLOY_TEST_CMD:-make -s test} >"$log" 2>&1; then
   git reset -q --hard "$before"
   exit 1
 fi
+
+# Expose the repo's skills to every Claude Code session on this machine.
+# Symlinks into this checkout, so each deploy updates them automatically.
+skills_dir=${CLAUDE_SKILLS_DIR:-$HOME/.claude/skills}
+mkdir -p "$skills_dir"
+for skill in skills/*/; do
+  name=$(basename "$skill")
+  target="$skills_dir/$name"
+  if [ -e "$target" ] && [ ! -L "$target" ]; then
+    echo "deploy: $target exists and is not a symlink; leaving it alone" >&2
+    continue
+  fi
+  ln -sfn "$PWD/skills/$name" "$target"
+done
 
 # Restart if a poller is running or the launchd agent is installed (the
 # agent must be kicked onto the new code even if it is between processes).
