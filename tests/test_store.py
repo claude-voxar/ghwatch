@@ -1,4 +1,5 @@
 import os
+import sqlite3
 import tempfile
 import unittest
 from datetime import timedelta
@@ -44,6 +45,27 @@ class StoreTest(unittest.TestCase):
                 add(self.conn, id="rolled-back")
                 raise RuntimeError
         self.assertIsNone(store.get_event(self.conn, "rolled-back"))
+
+    def test_migrates_database_from_before_backfill_column(self):
+        legacy_events = """CREATE TABLE events (
+          seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT UNIQUE NOT NULL, source TEXT NOT NULL,
+          type TEXT, reason TEXT, repo TEXT, actor TEXT, title TEXT, url TEXT,
+          created_at TEXT NOT NULL, fetched_at TEXT NOT NULL,
+          actionable INTEGER NOT NULL DEFAULT 0, payload TEXT)"""
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "old.db")
+            old = sqlite3.connect(path)
+            old.execute(legacy_events)
+            old.execute("INSERT INTO events(id, source, created_at, fetched_at) VALUES('e:old', 'own', 't', 't')")
+            old.commit()
+            old.close()
+            conn = store.connect(path)
+            columns = {r["name"] for r in conn.execute("PRAGMA table_info(events)")}
+            self.assertIn("backfill", columns)
+            self.assertEqual(store.get_event(conn, "e:old")["backfill"], 0)
+            self.assertTrue(store.insert_event(conn, make_event(id="e:new", backfill=1)))
+            self.assertEqual(store.get_event(conn, "e:new")["backfill"], 1)
+            store.connect(path).close()  # migrating twice is a no-op
 
     def test_connect_defaults_to_ghwatch_home(self):
         with tempfile.TemporaryDirectory() as d:

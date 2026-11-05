@@ -91,10 +91,10 @@ def register(conn, args):
 
 # ------------------------------------------------------------------ watch
 
-def watch_step(conn, consumer):
+def watch_step(conn, consumer, include_backfill=False):
     """One watch iteration: lines for new matching items not already done."""
     lines = []
-    for row in consumers.take_new(conn, consumer):
+    for row in consumers.take_new(conn, consumer, include_backfill):
         c = claims.get(conn, row["id"])
         if c and c["done_at"]:
             continue
@@ -148,7 +148,7 @@ def cmd_watch(args):
             return
         if not args.no_poller and not poller.is_running(home()):
             poller.start_detached(home())
-        for line in watch_step(conn, consumer):
+        for line in watch_step(conn, consumer, include_backfill=args.backlog):
             print(line, flush=True)
         msg = stale_message(conn, time.time(), started)
         if msg and not warned:
