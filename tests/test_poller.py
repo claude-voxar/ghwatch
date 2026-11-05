@@ -5,7 +5,7 @@ import tempfile
 import textwrap
 import unittest
 
-from ghwatch import poller, store
+from ghwatch import poller, repos, store
 from ghwatch.github import Response
 from tests.helpers import memdb
 
@@ -98,6 +98,28 @@ class PollOnceTest(unittest.TestCase):
         bad.__name__ = "bad"
         poller.poll_once(self.conn, self.gh(), "me", sources=(bad,))
         self.assertIsNone(store.get_state(self.conn, "etag:x"))
+
+    def test_tracked_repos_are_polled_with_their_own_etag(self):
+        repos.track(self.conn, "Other/Lib", "a")
+        push = {"id": "77", "type": "PushEvent", "actor": {"login": "bob"},
+                "repo": {"name": "other/lib"}, "created_at": "2026-11-05T10:00:00Z",
+                "payload": {"ref": "refs/heads/main", "size": 1}}
+        gh = self.gh(**{"/repos/other/lib/events": ok([push], ETag="L1")})
+        new, _ = poller.poll_once(self.conn, gh, "me")
+        self.assertEqual(new, 3)
+        row = store.get_event(self.conn, "e:77")
+        self.assertEqual((row["source"], row["repo"]), ("repo", "other/lib"))
+        self.assertEqual(store.get_state(self.conn, "etag:repo:other/lib"), "L1")
+        gh2 = self.gh(**{"/repos/other/lib/events": NOT_MODIFIED})
+        poller.poll_once(self.conn, gh2, "me")
+        self.assertIn(("/repos/other/lib/events", "L1", None), gh2.calls)
+
+    def test_untracked_repo_is_no_longer_polled(self):
+        repos.track(self.conn, "other/lib", "a")
+        repos.untrack(self.conn, "other/lib")
+        gh = self.gh()
+        poller.poll_once(self.conn, gh, "me")
+        self.assertNotIn("/repos/other/lib/events", [c[0] for c in gh.calls])
 
     def test_server_hint_propagates(self):
         gh = self.gh(**{"/notifications": ok([], **{"X-Poll-Interval": "180"})})

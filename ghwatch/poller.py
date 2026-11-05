@@ -12,7 +12,7 @@ import subprocess
 import sys
 import time
 
-from ghwatch import normalize, store
+from ghwatch import normalize, repos, store
 
 MIN_INTERVAL = 60
 MAX_INTERVAL = 300
@@ -113,9 +113,9 @@ def poll_notifications(conn, gh, login):
     return new, r
 
 
-def _event_poller(source, path_fmt):
+def _event_poller(source, path_fmt, etag_key=None):
     def poll(conn, gh, login):
-        key = f"etag:{source}"
+        key = etag_key or f"etag:{source}"
         r = gh.request("GET", path_fmt.format(login=login), etag=store.get_state(conn, key))
         if r.not_modified:
             return 0, r
@@ -130,6 +130,17 @@ def _event_poller(source, path_fmt):
     return poll
 
 
+def repo_poller(repo):
+    poll = _event_poller("repo", f"/repos/{repo}/events?per_page=100", etag_key=f"etag:repo:{repo}")
+    poll.__name__ = f"poll_repo_events({repo})"
+    return poll
+
+
+def current_sources(conn):
+    """Static feeds plus one per tracked repo; re-read every poll so `track` applies live."""
+    return SOURCES + tuple(repo_poller(r["repo"]) for r in repos.list_tracked(conn))
+
+
 SOURCES = (
     poll_notifications,
     _event_poller("received", "/users/{login}/received_events?per_page=100"),
@@ -137,14 +148,14 @@ SOURCES = (
 )
 
 
-def poll_once(conn, gh, login, sources=SOURCES):
+def poll_once(conn, gh, login, sources=None):
     """Poll every source once. Returns (new_items, max server poll hint).
 
     Each source commits independently, so one failing endpoint neither
     blocks the others nor leaves a half-written batch.
     """
     new_total, hint, ok = 0, MIN_INTERVAL, True
-    for source in sources:
+    for source in sources if sources is not None else current_sources(conn):
         try:
             with store.transaction(conn):
                 n, resp = source(conn, gh, login)
