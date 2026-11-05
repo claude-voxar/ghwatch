@@ -71,6 +71,12 @@ class ConsumerTest(unittest.TestCase):
         consumers.register(self.conn, "a", Filters(repo=["y/*"]))
         self.assertEqual(consumers.register(self.conn, "a").filters, Filters(repo=["y/*"]))
 
+    def test_forget(self):
+        consumers.register(self.conn, "a", Filters(repo=["x/*"]))
+        self.assertTrue(consumers.forget(self.conn, "a"))
+        self.assertFalse(consumers.forget(self.conn, "a"))
+        self.assertEqual(consumers.list_all(self.conn), [])
+
 
 if __name__ == "__main__":
     unittest.main()
