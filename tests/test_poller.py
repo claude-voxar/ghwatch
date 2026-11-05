@@ -114,6 +114,16 @@ class PollOnceTest(unittest.TestCase):
         poller.poll_once(self.conn, gh2, "me")
         self.assertIn(("/repos/other/lib/events", "L1", None), gh2.calls)
 
+    def test_broken_tracked_repo_does_not_make_poller_unhealthy(self):
+        repos.track(self.conn, "acme/typo", "a")
+        gh = self.gh(**{"/repos/acme/typo/events": RuntimeError("HTTP Error 404: Not Found")})
+        poller.poll_once(self.conn, gh, "me")
+        self.assertIsNotNone(store.get_state(self.conn, "last_poll"))
+        self.assertIsNone(store.get_state(self.conn, "last_error"))
+        self.assertIn("404", repos.get_error(self.conn, "acme/typo"))
+        poller.poll_once(self.conn, self.gh(**{"/repos/acme/typo/events": NOT_MODIFIED}), "me")
+        self.assertIsNone(repos.get_error(self.conn, "acme/typo"))
+
     def test_untracked_repo_is_no_longer_polled(self):
         repos.track(self.conn, "other/lib", "a")
         repos.untrack(self.conn, "other/lib")

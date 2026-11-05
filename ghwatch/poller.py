@@ -133,6 +133,7 @@ def _event_poller(source, path_fmt, etag_key=None):
 def repo_poller(repo):
     poll = _event_poller("repo", f"/repos/{repo}/events?per_page=100", etag_key=f"etag:repo:{repo}")
     poll.__name__ = f"poll_repo_events({repo})"
+    poll.repo = repo
     return poll
 
 
@@ -152,18 +153,26 @@ def poll_once(conn, gh, login, sources=None):
     """Poll every source once. Returns (new_items, max server poll hint).
 
     Each source commits independently, so one failing endpoint neither
-    blocks the others nor leaves a half-written batch.
+    blocks the others nor leaves a half-written batch. Only the core feeds
+    decide poller health: a broken tracked repo (typo, lost access) records
+    its own error instead of making every session see GHWATCH-STALE.
     """
     new_total, hint, ok = 0, MIN_INTERVAL, True
     for source in sources if sources is not None else current_sources(conn):
+        repo = getattr(source, "repo", None)
         try:
             with store.transaction(conn):
                 n, resp = source(conn, gh, login)
             new_total += n
             hint = max(hint, resp.poll_interval(MIN_INTERVAL))
+            if repo:
+                repos.clear_error(conn, repo)
         except Exception as ex:  # noqa: BLE001 - keep polling the other sources
-            ok = False
             log.warning("%s failed: %s", source.__name__, ex)
+            if repo:
+                repos.set_error(conn, repo, str(ex))
+                continue
+            ok = False
             store.set_state(conn, "last_error", f"{store.now_iso()} {source.__name__}: {ex}")
     pruned = store.prune(conn)
     now = store.now_iso()
