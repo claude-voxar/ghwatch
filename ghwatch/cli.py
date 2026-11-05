@@ -3,6 +3,7 @@
   poll [--once]               run the poller (exits if one is already running)
   ensure-poller               start a detached poller if none is running
   stop-poller / restart-poller  stop, or stop and start again (e.g. after an upgrade)
+  install-agent / uninstall-agent  run the poller under launchd (survives crashes/reboots)
   watch -c NAME [filters]     Monitor stream: one stdout line per new matching item
   inbox -c NAME [filters]     list open matching items with claim status
   claim ID... -c NAME         take items; reports who has them if not you
@@ -32,7 +33,7 @@ import os
 import sys
 import time
 
-from ghwatch import claims, consumers, poller, repos, store, transcripts
+from ghwatch import claims, consumers, launchd, poller, repos, store, transcripts
 from ghwatch.consumers import Filters
 from ghwatch.github import GitHub
 
@@ -169,6 +170,9 @@ def cmd_poll(args):
 def cmd_ensure_poller(args):
     if poller.is_running(home()):
         print("poller: running")
+    elif launchd.is_installed():
+        launchd.launchctl("kickstart", launchd.service())
+        print("poller: started via launchd agent")
     else:
         poller.start_detached(home())
         print(f"poller: started (log: {os.path.join(home(), 'poller.log')})")
@@ -179,15 +183,38 @@ def cmd_stop_poller(args):
         print("poller: not running")
     elif poller.stop(home()):
         print("poller: stopped")
+        if launchd.is_installed():
+            print("note: the launchd agent will start it again shortly; "
+                  "use uninstall-agent to stop polling for good")
     else:
         sys.exit("poller: did not stop within timeout")
 
 
 def cmd_restart_poller(args):
+    if launchd.is_installed():
+        if not launchd.restart(home()):
+            sys.exit("poller: launchd agent did not take over the lock within timeout")
+        print(f"poller: restarted via launchd agent (pid {launchd.agent_pid()})")
+        return
     if not poller.stop(home()):
         sys.exit("poller: did not stop within timeout; not restarting")
     poller.start_detached(home())
     print(f"poller: restarted (log: {os.path.join(home(), 'poller.log')})")
+
+
+def cmd_install_agent(args):
+    path = launchd.install(home())
+    if not launchd.restart(home()):
+        sys.exit(f"installed {path}, but the agent did not take over the poller lock")
+    print(f"launchd agent installed: {path} (pid {launchd.agent_pid()})")
+
+
+def cmd_uninstall_agent(args):
+    removed = launchd.uninstall()
+    print("launchd agent removed" if removed else "launchd agent was not installed")
+    if removed and not poller.is_running(home()):
+        poller.start_detached(home())
+        print("poller: started detached so polling continues")
 
 
 def cmd_inbox(args):
@@ -338,6 +365,9 @@ def cmd_status(args):
     print(json.dumps({
         "home": home(),
         "poller_running": poller.is_running(home()),
+        "poller_pid": poller.running_pid(home()),
+        "launchd_agent": ({"installed": True, "pid": launchd.agent_pid()}
+                          if launchd.is_installed() else {"installed": False}),
         "login": store.get_state(conn, "login"),
         "last_poll": store.get_state(conn, "last_poll"),
         "interval_s": store.get_state(conn, "interval"),
@@ -379,6 +409,8 @@ def build_parser():
     add("ensure-poller", cmd_ensure_poller)
     add("stop-poller", cmd_stop_poller)
     add("restart-poller", cmd_restart_poller)
+    add("install-agent", cmd_install_agent)
+    add("uninstall-agent", cmd_uninstall_agent)
     p = add("watch", cmd_watch, consumer=True, filters=True)
     p.add_argument("--interval", type=float, default=15, help="seconds between DB checks")
     p.add_argument("--backlog", action="store_true", help="replay all matching items first")
