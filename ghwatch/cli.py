@@ -85,14 +85,34 @@ def stale_message(conn, now, watching_since):
             f"last_error={store.get_state(conn, 'last_error')}")
 
 
+PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
+UPGRADED_MSG = ("GHWATCH-UPGRADED ghwatch code changed on disk; this watch has exited. "
+                "Re-arm the Monitor with the same command to run the new version.")
+
+
+def code_fingerprint(package_dir=PACKAGE_DIR):
+    """Changes whenever any module of the package is modified, added or removed."""
+    parts = []
+    for name in sorted(os.listdir(package_dir)):
+        if name.endswith(".py"):
+            st = os.stat(os.path.join(package_dir, name))
+            parts.append((name, st.st_mtime_ns, st.st_size))
+    return tuple(parts)
+
+
 def cmd_watch(args):
     conn = db()
     consumer = consumers.register(conn, args.consumer, filters_from(args))
     if args.backlog:
         consumer.cursor = 0
     started = time.time()
+    fingerprint = code_fingerprint()
     warned = False
     while True:
+        if code_fingerprint() != fingerprint:
+            # Long-running watchers would otherwise keep old code forever.
+            print(UPGRADED_MSG, flush=True)
+            return
         if not args.no_poller and not poller.is_running(home()):
             poller.start_detached(home())
         for line in watch_step(conn, consumer):

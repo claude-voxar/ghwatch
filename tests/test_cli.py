@@ -1,7 +1,9 @@
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from datetime import timedelta
 
@@ -101,6 +103,23 @@ class EndToEndTest(unittest.TestCase):
             proc.wait()
         self.assertIn("[mention]", line)
         self.assertIn("ping me", line)
+
+    def test_watch_exits_when_code_changes(self):
+        repo = os.path.join(self.tmp.name, "repo")
+        shutil.copytree(ROOT, repo, ignore=shutil.ignore_patterns(".git", "__pycache__"))
+        proc = subprocess.Popen(
+            [sys.executable, os.path.join(repo, "bin", "ghwatch"), "watch", "-c", "u",
+             "--no-poller", "--interval", "0.1"],
+            stdout=subprocess.PIPE, text=True, env=self.env)
+        try:
+            time.sleep(1)
+            with open(os.path.join(repo, "ghwatch", "store.py"), "a") as fh:
+                fh.write("\n# upgraded\n")
+            out, _ = proc.communicate(timeout=10)
+        finally:
+            proc.kill()
+        self.assertEqual(proc.returncode, 0)
+        self.assertIn("GHWATCH-UPGRADED", out)
 
     def test_show_and_status(self):
         ev = add(self.conn)["id"]
