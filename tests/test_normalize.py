@@ -61,7 +61,7 @@ class EventRowTest(unittest.TestCase):
         row = normalize.event_row(e, "received", "me", NOW)
         self.assertEqual((row["actionable"], row["reason"]), (1, "mention"))
         self.assertEqual(row["url"], "https://x/c")
-        self.assertEqual(row["title"], "commented on #4 Bug")
+        self.assertEqual(row["title"], "commented on issue #4 Bug")
 
     def test_self_mention_is_not_actionable(self):
         e = event("IssueCommentEvent", {"comment": {"body": "@me"}}, actor="me")
@@ -70,10 +70,29 @@ class EventRowTest(unittest.TestCase):
     def test_review_and_pr_summaries(self):
         review = event("PullRequestReviewEvent", {
             "pull_request": {"number": 2, "title": "T"}, "review": {"state": "approved"}})
-        self.assertEqual(normalize.describe_event(review)[0], "reviewed (approved) #2 T")
+        self.assertEqual(normalize.describe_event(review)[0], "reviewed (approved) PR #2 T")
         opened = event("PullRequestEvent", {"action": "opened",
                                             "pull_request": {"number": 5, "title": "New"}})
-        self.assertEqual(normalize.describe_event(opened)[0], "opened #5 New")
+        self.assertEqual(normalize.describe_event(opened)[0], "opened PR #5 New")
+
+    def test_trimmed_pr_payload(self):
+        # Shape GitHub actually sends: no title, no html_url.
+        e = event("PullRequestEvent", {"action": "merged", "number": 2, "pull_request": {
+            "url": "https://api.github.com/repos/acme/app/pulls/2", "id": 1, "number": 2}})
+        self.assertEqual(normalize.describe_event(e),
+                         ("merged PR #2", "https://github.com/acme/app/pull/2"))
+
+    def test_comment_on_pr_vs_issue(self):
+        on_pr = event("IssueCommentEvent", {"issue": {"number": 3, "pull_request": {},
+                                                      "url": "https://api.github.com/repos/acme/app/issues/3"}})
+        self.assertEqual(normalize.describe_event(on_pr),
+                         ("commented on PR #3", "https://github.com/acme/app/issues/3"))
+        on_issue = event("IssueCommentEvent", {"issue": {"number": 4, "title": "Bug"}})
+        self.assertEqual(normalize.describe_event(on_issue)[0], "commented on issue #4 Bug")
+
+    def test_push_without_size(self):
+        e = event("PushEvent", {"ref": "refs/heads/main", "head": "abc"})
+        self.assertEqual(normalize.describe_event(e)[0], "pushed to main")
 
     def test_unknown_event_falls_back_to_type(self):
         self.assertEqual(normalize.describe_event(event("WatchEvent", {}))[0], "WatchEvent")
