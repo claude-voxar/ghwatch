@@ -5,6 +5,7 @@ is subscribed to or acts in. Tracking a repo makes ghwatch see everything
 that happens there, so a session can watch any repo it works on.
 """
 import re
+import urllib.error
 
 from ghwatch import store
 
@@ -52,3 +53,16 @@ def clear_error(conn, repo):
 
 def get_error(conn, repo):
     return store.get_state(conn, _error_key(repo))
+
+
+def check_exists(gh, repo):
+    """True/False if GitHub says whether `repo` is visible; None if we couldn't tell."""
+    try:
+        gh.request("GET", f"/repos/{normalize_name(repo)}")
+        return True
+    except urllib.error.HTTPError as ex:
+        if ex.code == 404:
+            return False
+        return None
+    except Exception:  # noqa: BLE001 - offline, no gh auth, ...: don't block tracking
+        return None

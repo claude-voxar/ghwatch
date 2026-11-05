@@ -61,10 +61,22 @@ def filters_from(args):
     return Filters(all_events=args.all_events, **fields)
 
 
+def verify_repo(repo):
+    """False only when GitHub says the repo doesn't exist (or isn't visible)."""
+    if os.environ.get("GHWATCH_SKIP_REPO_CHECK"):  # tests / offline use
+        return True
+    return repos.check_exists(GitHub(), repo) is not False
+
+
 def auto_track(conn, consumer):
     """Follow every exact --repo a consumer filters on, so its events actually arrive."""
+    tracked = {r["repo"] for r in repos.list_tracked(conn)}
     for pattern in consumer.filters.fields.get("repo", []):
-        if repos.is_exact(pattern) and repos.track(conn, pattern, consumer.name):
+        if not repos.is_exact(pattern) or pattern in tracked:
+            continue
+        if not verify_repo(pattern):
+            print(f"ghwatch: {pattern} not found on GitHub; not tracking it", file=sys.stderr, flush=True)
+        elif repos.track(conn, pattern, consumer.name):
             print(f"ghwatch: now tracking {pattern}", file=sys.stderr, flush=True)
 
 
@@ -265,10 +277,14 @@ def cmd_track(args):
     conn = db()
     for repo in args.repos:
         try:
-            added = repos.track(conn, repo, args.consumer)
+            repos.normalize_name(repo)
         except ValueError as ex:
             print(f"{repo}: {ex}")
             continue
+        if not verify_repo(repo):
+            print(f"{repo}: not found on GitHub (typo, or no access); not tracking")
+            continue
+        added = repos.track(conn, repo, args.consumer)
         print(f"{repo}: {'tracking' if added else 'already tracked'}")
 
 
@@ -279,9 +295,12 @@ def cmd_untrack(args):
 
 
 def cmd_tracked(args):
-    rows = repos.list_tracked(db())
+    conn = db()
+    rows = repos.list_tracked(conn)
     for r in rows:
-        print(f"{r['repo']} (added by {r['added_by']} at {r['added_at']})")
+        err = repos.get_error(conn, r["repo"])
+        print(f"{r['repo']} (added by {r['added_by']} at {r['added_at']})"
+              + (f" ERROR: {err}" if err else ""))
     if not rows:
         print("(no tracked repos)")
 
