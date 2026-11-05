@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Deploy origin/main into the production checkout this script lives in.
+#
+#   bin/deploy [--force]
+#
+# Fast-forwards, runs the test suite on this host and, if it fails, rolls
+# back to the previous commit. On success restarts the poller (if one is
+# running) so it loads the new code; running watchers notice the change
+# themselves and exit with GHWATCH-UPGRADED.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+branch=$(git rev-parse --abbrev-ref HEAD)
+if [ "$branch" != main ]; then
+  echo "deploy: production checkout must be on main (is on $branch)" >&2; exit 1
+fi
+if [ -n "$(git status --porcelain)" ]; then
+  echo "deploy: working tree has local changes; refusing" >&2; exit 1
+fi
+
+before=$(git rev-parse HEAD)
+git pull --ff-only -q
+after=$(git rev-parse HEAD)
+if [ "$before" = "$after" ] && [ "${1:-}" != "--force" ]; then
+  echo "deploy: already at ${after:0:7}"; exit 0
+fi
+
+log=$(mktemp)
+if ! ${GHWATCH_DEPLOY_TEST_CMD:-make -s test} >"$log" 2>&1; then
+  echo "deploy: tests FAILED on ${after:0:7}; rolling back to ${before:0:7}" >&2
+  tail -20 "$log" >&2
+  git reset -q --hard "$before"
+  exit 1
+fi
+
+if [ -n "$(bin/ghwatch status | grep '"poller_running": true')" ]; then
+  bin/ghwatch restart-poller
+fi
+echo "deploy: ${before:0:7} -> ${after:0:7}"
+git log --oneline "$before..$after"
