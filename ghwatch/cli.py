@@ -2,6 +2,7 @@
 
   poll [--once]               run the poller (exits if one is already running)
   ensure-poller               start a detached poller if none is running
+  stop-poller / restart-poller  stop, or stop and start again (e.g. after an upgrade)
   watch -c NAME [filters]     Monitor stream: one stdout line per new matching item
   inbox -c NAME [filters]     list open matching items with claim status
   claim ID... -c NAME         take items; reports who has them if not you
@@ -119,6 +120,22 @@ def cmd_ensure_poller(args):
     else:
         poller.start_detached(home())
         print(f"poller: started (log: {os.path.join(home(), 'poller.log')})")
+
+
+def cmd_stop_poller(args):
+    if poller.running_pid(home()) is None:
+        print("poller: not running")
+    elif poller.stop(home()):
+        print("poller: stopped")
+    else:
+        sys.exit("poller: did not stop within timeout")
+
+
+def cmd_restart_poller(args):
+    if not poller.stop(home()):
+        sys.exit("poller: did not stop within timeout; not restarting")
+    poller.start_detached(home())
+    print(f"poller: restarted (log: {os.path.join(home(), 'poller.log')})")
 
 
 def cmd_inbox(args):
@@ -247,6 +264,8 @@ def build_parser():
 
     add("poll", cmd_poll).add_argument("--once", action="store_true")
     add("ensure-poller", cmd_ensure_poller)
+    add("stop-poller", cmd_stop_poller)
+    add("restart-poller", cmd_restart_poller)
     p = add("watch", cmd_watch, consumer=True, filters=True)
     p.add_argument("--interval", type=float, default=15, help="seconds between DB checks")
     p.add_argument("--backlog", action="store_true", help="replay all matching items first")
