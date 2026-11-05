@@ -10,7 +10,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        # macOS runners are 10x minutes on private repos and queue for long
+        # stretches; the deploy step runs `make test` on the macOS host instead.
+        os: [ubuntu-latest]
         python: ["3.9", "3.13"]
     runs-on: ${{ matrix.os }}
     steps:
