@@ -65,7 +65,7 @@ class EndToEndTest(unittest.TestCase):
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.env = dict(os.environ, GHWATCH_HOME=self.tmp.name)
+        self.env = dict(os.environ, GHWATCH_HOME=self.tmp.name, GHWATCH_SKIP_REPO_CHECK="1")
         self.conn = store.connect(os.path.join(self.tmp.name, "ghwatch.db"))
 
     def tearDown(self):
@@ -131,6 +131,8 @@ class EndToEndTest(unittest.TestCase):
         self.assertNotIn("acme/*", tracked)
         self.assertIn("untracked", self.run_cli("untrack", "acme/lib"))
         self.assertEqual([r["repo"] for r in repos.list_tracked(self.conn)], ["acme/app"])
+        repos.set_error(self.conn, "acme/app", "HTTP Error 404")
+        self.assertIn("ERROR: ", self.run_cli("tracked"))
 
     def test_show_and_status(self):
         ev = add(self.conn)["id"]

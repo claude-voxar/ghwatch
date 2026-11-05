@@ -1,4 +1,5 @@
 import unittest
+import urllib.error
 
 from ghwatch import repos
 from tests.helpers import memdb
@@ -28,6 +29,23 @@ class ReposTest(unittest.TestCase):
         self.assertFalse(repos.is_exact("acme/*"))
         self.assertFalse(repos.is_exact("acme/ap?"))
         self.assertFalse(repos.is_exact("acme"))
+
+
+class FakeGH:
+    def __init__(self, exc=None):
+        self.exc = exc
+
+    def request(self, method, path):
+        if self.exc:
+            raise self.exc
+
+
+class CheckExistsTest(unittest.TestCase):
+    def test_outcomes(self):
+        self.assertTrue(repos.check_exists(FakeGH(), "a/b"))
+        self.assertFalse(repos.check_exists(FakeGH(urllib.error.HTTPError("u", 404, "nf", {}, None)), "a/b"))
+        self.assertIsNone(repos.check_exists(FakeGH(urllib.error.HTTPError("u", 502, "x", {}, None)), "a/b"))
+        self.assertIsNone(repos.check_exists(FakeGH(OSError("offline")), "a/b"))
 
 
 if __name__ == "__main__":
