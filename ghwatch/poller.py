@@ -105,13 +105,40 @@ def next_interval(current, new_items, server_hint):
     return max(interval, min(server_hint, MAX_INTERVAL))
 
 
+MAX_EVENT_PAGES = 3          # the events API serves at most 300 events (3 x 100)
+MAX_NOTIFICATION_PAGES = 5   # 250 unread threads
+
+
+def follow_pages(gh, first, max_pages, seen_enough):
+    """Items of `first` plus following pages (Link rel=next).
+
+    Stops after a page for which seen_enough(page_items) is true (it reached
+    items already stored, so older pages are known too) or after max_pages.
+    """
+    items, r, pages = list(first.body or []), first, 1
+    while pages < max_pages and r.next_path and not seen_enough(r.body or []):
+        r = gh.request("GET", r.next_path)
+        items.extend(r.body or [])
+        pages += 1
+    if pages == max_pages and r.next_path and not seen_enough(r.body or []):
+        log.warning("page cap (%d) reached before known items; older ones may be missed", max_pages)
+    return items
+
+
+def _stored(conn, ids):
+    return any(store.get_event(conn, i) is not None for i in ids)
+
+
 def poll_notifications(conn, gh, login):
     r = gh.request("GET", "/notifications?all=false&per_page=50",
                    if_modified_since=store.get_state(conn, "notif_last_modified"))
     if r.not_modified:
         return 0, r
     fetched = store.now_iso()
-    new = sum(store.insert_event(conn, normalize.notification_row(n, fetched)) for n in r.body or [])
+    rows = [normalize.notification_row(n, fetched) for n in follow_pages(
+        gh, r, MAX_NOTIFICATION_PAGES,
+        lambda page: _stored(conn, (normalize.notification_row(n, fetched)["id"] for n in page)))]
+    new = sum(store.insert_event(conn, row) for row in rows)
     if r.headers.get("Last-Modified"):
         store.set_state(conn, "notif_last_modified", r.headers["Last-Modified"])
     return new, r
@@ -132,7 +159,12 @@ def _event_poller(source, path_fmt, etag_key=None, backfill_before=None):
             return 0, r
         fetched = store.now_iso()
         first_sync = etag is None and backfill_before is not None
-        events = sorted(r.body or [], key=lambda e: e["created_at"])
+        cutoff = store.retention_cutoff()
+        events = follow_pages(
+            gh, r, MAX_EVENT_PAGES,
+            lambda page: _stored(conn, (f"e:{e['id']}" for e in page))
+            or any(e["created_at"] < cutoff for e in page))
+        events = sorted(events, key=lambda e: e["created_at"])
         new = 0
         for e in events:
             row = normalize.event_row(e, source, login, fetched)
