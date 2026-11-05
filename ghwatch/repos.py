@@ -36,3 +36,19 @@ def untrack(conn, repo):
 
 def list_tracked(conn):
     return conn.execute("SELECT * FROM tracked_repos ORDER BY repo").fetchall()
+
+
+def _error_key(repo):
+    return f"repo_error:{repo}"
+
+
+def set_error(conn, repo, message):
+    store.set_state(conn, _error_key(repo), f"{store.now_iso()} {message}")
+
+
+def clear_error(conn, repo):
+    conn.execute("DELETE FROM state WHERE key=?", (_error_key(repo),))
+
+
+def get_error(conn, repo):
+    return store.get_state(conn, _error_key(repo))
