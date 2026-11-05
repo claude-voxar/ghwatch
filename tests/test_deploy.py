@@ -70,6 +70,22 @@ class DeployTest(unittest.TestCase):
         self.assertIn("not a symlink; leaving it alone", r.stderr)
         self.assertFalse(os.path.islink(mine))
 
+    def test_new_deploy_steps_run_in_the_same_deploy(self):
+        path = os.path.join(self.work, "bin", "deploy")
+        with open(path) as fh:
+            script = fh.read()
+        marker = 'echo "deploy: ${before:0:7} -> ${after:0:7}"'
+        self.assertIn(marker, script)
+        with open(path, "w") as fh:
+            fh.write(script.replace(marker, 'echo "NEW STEP RAN from=${before:0:7}"\n' + marker))
+        git(self.work, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qam", "new step")
+        git(self.work, "push", "-q", "origin", "main")
+        before = git(self.prod, "rev-parse", "--short=7", "HEAD").strip()
+        r = self.deploy()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("continuing with the new version", r.stdout)
+        self.assertIn(f"NEW STEP RAN from={before}", r.stdout)
+
     def test_failing_tests_roll_back(self):
         before = git(self.prod, "rev-parse", "HEAD")
         self.push_change("\ndef broken(:\n")

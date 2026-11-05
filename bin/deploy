@@ -19,11 +19,23 @@ if [ -n "$(git status --porcelain)" ]; then
   echo "deploy: working tree has local changes; refusing" >&2; exit 1
 fi
 
-before=$(git rev-parse HEAD)
-git pull --ff-only -q
-after=$(git rev-parse HEAD)
-if [ "$before" = "$after" ] && [ "${1:-}" != "--force" ]; then
-  echo "deploy: already at ${after:0:7}"; exit 0
+if [ -n "${GHWATCH_DEPLOY_BEFORE:-}" ]; then
+  # Re-executed by an older copy of this script after the pull below.
+  before=$GHWATCH_DEPLOY_BEFORE
+  after=$(git rev-parse HEAD)
+else
+  before=$(git rev-parse HEAD)
+  git pull --ff-only -q
+  after=$(git rev-parse HEAD)
+  if [ "$before" = "$after" ] && [ "${1:-}" != "--force" ]; then
+    echo "deploy: already at ${after:0:7}"; exit 0
+  fi
+  # bash keeps running the copy of this script it started with, so steps
+  # added by this very deploy would only run next time. Hand over instead.
+  if ! git diff --quiet "$before" "$after" -- bin/deploy; then
+    echo "deploy: bin/deploy changed; continuing with the new version"
+    GHWATCH_DEPLOY_BEFORE=$before exec bin/deploy "$@"
+  fi
 fi
 
 log=$(mktemp)
