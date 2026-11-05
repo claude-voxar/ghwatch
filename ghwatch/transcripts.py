@@ -19,14 +19,29 @@ TOOLS = {"Bash", "Monitor"}
 MAX_PENDING = 2000
 MAX_REPORTED = 5000
 
+# Exact text watch emits; docs mention the marker but never this phrase.
+STALE = "GHWATCH-STALE no successful poll"
+
 # Output of a ghwatch command that indicates something went wrong.
 FAILURE = re.compile(
-    r"Traceback \(most recent call last\)|GHWATCH-STALE|^\S*ghwatch[^:\n]*: error:|"
+    r"Traceback \(most recent call last\)|" + STALE + r"|^\S*ghwatch[^:\n]*: error:|"
     r"\b\w*Error\b|No such file|Permission denied|database is locked|command not found|"
     r"not an owner/name|unknown filter|did not stop|could not |Exit code [1-9]",
     re.MULTILINE)
 # Text arriving in a session outside a tool result (e.g. Monitor events).
-NOTICE = re.compile(r"GHWATCH-STALE[^\n\"]*")
+NOTICE = re.compile(STALE + r"[^\n\"<]*")
+
+
+def invocation_pattern(subcommands):
+    """Regex matching a shell command that runs the ghwatch CLI (not one that
+    merely mentions the repo, e.g. `cd ~/ghwatch && cat README.md`)."""
+    subs = "|".join(sorted(map(re.escape, subcommands), key=len, reverse=True))
+    return re.compile(rf"(?:^|[\s;&|(])(?:\S*/)?ghwatch\s+(?:{subs})(?![\w-])|-m\s+ghwatch\s|bin/deploy\b")
+
+
+def cli_subcommands():
+    from ghwatch import cli  # local import: cli imports this module
+    return next(a for a in cli.build_parser()._actions if a.dest == "cmd").choices.keys()
 
 
 class Problem:
@@ -73,8 +88,9 @@ def failure_detail(output, is_error):
 
 
 class Scanner:
-    def __init__(self, root=DEFAULT_ROOT, state_path=None, exclude_sessions=()):
+    def __init__(self, root=DEFAULT_ROOT, state_path=None, exclude_sessions=(), subcommands=None):
         self.root = root
+        self.invocation = invocation_pattern(subcommands or cli_subcommands())
         self.state_path = state_path
         self.exclude = {s for s in exclude_sessions if s}
         self.state = {"offsets": {}, "lines": {}, "pending": {}, "reported": [], "initialized": False}
@@ -169,7 +185,7 @@ class Scanner:
         if item.get("name") not in TOOLS:
             return
         command = (item.get("input") or {}).get("command") or ""
-        if "ghwatch" in command:
+        if self.invocation.search(command):
             self.state["pending"][item.get("id")] = command
 
     def _result(self, item, meta, where):

@@ -80,17 +80,32 @@ class ScannerTest(unittest.TestCase):
                    tool_use("t2", "ls /nope"), tool_result("t2", "No such file", True))
         self.assertEqual(self.scanner().scan(), [])
 
+    def test_reading_ghwatch_files_is_not_running_ghwatch(self):
+        readme = "- **`GHWATCH-STALE ...`** means no successful poll has completed\nraise HTTPError(...)"
+        cmds = ["cd ~/ghwatch && ls; cat README.md", "grep -rn Error ~/ghwatch/ghwatch",
+                "cat ~/ghwatch/ghwatch/github.py", "cd ~/ghwatch-dev && make test"]
+        for i, cmd in enumerate(cmds):
+            self.write(tool_use(f"r{i}", cmd), tool_result(f"r{i}", readme, True))
+        self.assertEqual(self.scanner().scan(), [])
+
+    def test_recognises_real_invocations(self):
+        cmds = ["~/ghwatch/bin/ghwatch inbox -c a", "cd x && ghwatch claim e:1 -c a",
+                "GHWATCH_HOME=/t python3 -m ghwatch poll --once", "~/ghwatch/bin/deploy"]
+        for i, cmd in enumerate(cmds):
+            self.write(tool_use(f"v{i}", cmd), tool_result(f"v{i}", "database is locked", True))
+        self.assertEqual(len(self.scanner().scan()), len(cmds))
+
     def test_monitor_stale_notice(self):
-        self.write(notice("<task-notification>GHWATCH-STALE no successful poll for 900s; last_error=x</task-notification>"))
+        self.write(notice("<task-notification><event>GHWATCH-STALE no successful poll for 900s; last_error=x</event></task-notification>"))
         [p] = self.scanner().scan()
         self.assertIn("GHWATCH-STALE no successful poll for 900s", p.detail)
 
     def test_excluded_session(self):
-        self.write(tool_use("t1", "ghwatch x", session="me"), tool_result("t1", "Error", True, session="me"))
+        self.write(tool_use("t1", "ghwatch status", session="me"), tool_result("t1", "Error", True, session="me"))
         self.assertEqual(self.scanner(exclude_sessions=["me"]).scan(), [])
 
     def test_incremental_partial_lines_and_persistence(self):
-        self.write(tool_use("t1", "ghwatch status"), raw='{"type": "user", "sessio')
+        self.write(tool_use("t1", "~/ghwatch/bin/ghwatch status"), raw='{"type": "user", "sessio')
         s = self.scanner()
         self.assertEqual(s.scan(), [])
         s.save()
@@ -103,7 +118,7 @@ class ScannerTest(unittest.TestCase):
         self.assertTrue(p.where.endswith(":2"))
 
     def test_no_repeats_across_restarts(self):
-        self.write(notice("GHWATCH-STALE x"))
+        self.write(notice("GHWATCH-STALE no successful poll for 1s"))
         s = self.scanner()
         self.assertEqual(len(s.scan()), 1)
         s.save()
@@ -112,14 +127,14 @@ class ScannerTest(unittest.TestCase):
         self.assertEqual(s2.scan(), [])
 
     def test_skip_history_then_new_files_read_from_start(self):
-        self.write(notice("GHWATCH-STALE old"))
+        self.write(notice("GHWATCH-STALE no successful poll for old"))
         s = self.scanner()
         s.skip_history()
         self.assertEqual(s.scan(), [])
         other = os.path.join(self.root, "proj", "sub", "s2.jsonl")
         os.makedirs(os.path.dirname(other))
         with open(other, "w") as fh:
-            fh.write(json.dumps(notice("GHWATCH-STALE new", session="s2")) + "\n")
+            fh.write(json.dumps(notice("GHWATCH-STALE no successful poll for new", session="s2")) + "\n")
         [p] = s.scan()
         self.assertEqual(p.session, "s2")
 

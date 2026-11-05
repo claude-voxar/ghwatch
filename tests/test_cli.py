@@ -145,11 +145,11 @@ class EndToEndTest(unittest.TestCase):
                 fh.write(json.dumps({"type": "user", "sessionId": "abc", "uuid": text,
                                      "message": {"content": text}}) + "\n")
 
-        append("GHWATCH-STALE old")
+        append("GHWATCH-STALE no successful poll for old")
         args = ("scan-transcripts", "--root", os.path.dirname(root))
         self.assertEqual(self.run_cli(*args), "")
-        append("GHWATCH-STALE new")
-        self.assertIn("GHWATCH-STALE new", self.run_cli(*args))
+        append("GHWATCH-STALE no successful poll for new")
+        self.assertIn("poll for new", self.run_cli(*args))
         self.assertEqual(self.run_cli(*args), "")
         self.assertEqual(self.run_cli(*args, "--exclude-session", "abc"), "")
 
