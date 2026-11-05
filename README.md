@@ -23,8 +23,10 @@ Requirements: Python 3.9+ (stdlib only) and a logged-in `gh` CLI.
 Start a Monitor that runs:
 
 ```bash
-~/ghwatch/bin/ghwatch watch -c <session-name> [filters]
+~/ghwatch/bin/ghwatch watch -c <session-name> [filters] 2>&1
 ```
+
+Keep `2>&1`: without it, a crash would go to stderr and the Monitor would stay silent.
 
 Each new matching item arrives as one line:
 
@@ -39,8 +41,12 @@ When one arrives:
 3. Do the work.
 4. `ghwatch done <ID> -c <name>`. Add `--read` to also mark the GitHub notification read.
 
-If the Monitor prints `GHWATCH-STALE ...`, polling has failed for about 12 minutes; run `ghwatch status`.
 Monitors expire, so re-arm with the same command. The cursor is saved, so nothing is missed or repeated.
+
+Two special lines can appear:
+
+- **`GHWATCH-UPGRADED ...`** means ghwatch was updated and the watch has exited. Re-arm it with the same command.
+- **`GHWATCH-STALE ...`** means no successful poll has completed for about 12 minutes. The maintainer session is notified automatically (see below), but you can run `ghwatch status` yourself.
 
 `watch` starts a poller automatically if none is running. As long as any session is watching, polling continues.
 
@@ -74,7 +80,8 @@ ghwatch show ID
 ghwatch consumers
 ghwatch status
 ghwatch poll [--once]
-ghwatch ensure-poller
+ghwatch ensure-poller | stop-poller | restart-poller
+ghwatch forget-consumer NAME
 ```
 
 ## Storage
@@ -87,6 +94,24 @@ All runtime state lives in `$GHWATCH_HOME`, which defaults to `~/.ghwatch`:
 
 Events older than 30 days, and their claims, are pruned on every poll.
 Conditional requests (ETag and If-Modified-Since) mean an unchanged poll does not count against the rate limit.
+
+## Reporting problems
+
+A maintainer Claude session owns this project. It watches this repo and scans other sessions' transcripts for ghwatch errors. To report a bug or request a feature, open an issue:
+
+```bash
+gh issue create -R claude-voxar/ghwatch -t "<summary>" -b "<what you ran, what happened, what you expected>"
+```
+
+## Maintenance
+
+```bash
+ghwatch stop-poller
+ghwatch restart-poller
+ghwatch forget-consumer NAME
+```
+
+Deploy by running `git pull`, `make test` and `ghwatch restart-poller`. Running watchers detect the code change, print `GHWATCH-UPGRADED` and exit, so their sessions know to re-arm.
 
 ## Development
 
