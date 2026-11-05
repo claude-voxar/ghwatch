@@ -14,6 +14,8 @@
   track REPO... -c NAME       poll owner/name's event feed directly
   untrack REPO... / tracked   stop following / list followed repos
 
+  scan-transcripts [--follow]  report ghwatch failures seen in other sessions' transcripts
+
 An exact --repo filter (no wildcards) on watch/inbox tracks that repo automatically.
   status                      poller health and counts
 
@@ -30,7 +32,7 @@ import os
 import sys
 import time
 
-from ghwatch import claims, consumers, poller, repos, store
+from ghwatch import claims, consumers, poller, repos, store, transcripts
 from ghwatch.consumers import Filters
 from ghwatch.github import GitHub
 
@@ -305,6 +307,26 @@ def cmd_tracked(args):
         print("(no tracked repos)")
 
 
+def cmd_scan_transcripts(args):
+    state_path = os.path.join(home(), "transcript-scan.json")
+    first_run = not os.path.exists(state_path)
+    scanner = transcripts.Scanner(args.root, state_path, args.exclude_session or ())
+    if first_run and not args.from_start:
+        scanner.skip_history()
+        scanner.save()
+    fingerprint = code_fingerprint()
+    while True:
+        for problem in scanner.scan():
+            print(problem.line(), flush=True)
+        scanner.save()
+        if not args.follow:
+            return
+        if code_fingerprint() != fingerprint:
+            print(UPGRADED_MSG, flush=True)
+            return
+        time.sleep(args.interval)
+
+
 def cmd_forget_consumer(args):
     ok = consumers.forget(db(), args.name)
     print(f"{args.name}: {'forgotten' if ok else 'no such consumer'}")
@@ -372,6 +394,14 @@ def build_parser():
     add("track", cmd_track, consumer=True).add_argument("repos", nargs="+", metavar="OWNER/NAME")
     add("untrack", cmd_untrack).add_argument("repos", nargs="+", metavar="OWNER/NAME")
     add("tracked", cmd_tracked)
+    p = add("scan-transcripts", cmd_scan_transcripts)
+    p.add_argument("--follow", action="store_true", help="keep scanning (for a Monitor)")
+    p.add_argument("--interval", type=float, default=30)
+    p.add_argument("--exclude-session", action="append", metavar="SESSION_ID",
+                   help="ignore this session's transcript (e.g. the maintainer's own)")
+    p.add_argument("--root", default=transcripts.DEFAULT_ROOT)
+    p.add_argument("--from-start", action="store_true",
+                   help="on first run, scan existing history instead of starting at the end")
     add("status", cmd_status)
     return ap
 

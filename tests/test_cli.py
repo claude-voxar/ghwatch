@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import subprocess
@@ -133,6 +134,24 @@ class EndToEndTest(unittest.TestCase):
         self.assertEqual([r["repo"] for r in repos.list_tracked(self.conn)], ["acme/app"])
         repos.set_error(self.conn, "acme/app", "HTTP Error 404")
         self.assertIn("ERROR: ", self.run_cli("tracked"))
+
+    def test_scan_transcripts_skips_history_on_first_run(self):
+        root = os.path.join(self.tmp.name, "projects", "p")
+        os.makedirs(root)
+        path = os.path.join(root, "s.jsonl")
+
+        def append(text):
+            with open(path, "a") as fh:
+                fh.write(json.dumps({"type": "user", "sessionId": "abc", "uuid": text,
+                                     "message": {"content": text}}) + "\n")
+
+        append("GHWATCH-STALE old")
+        args = ("scan-transcripts", "--root", os.path.dirname(root))
+        self.assertEqual(self.run_cli(*args), "")
+        append("GHWATCH-STALE new")
+        self.assertIn("GHWATCH-STALE new", self.run_cli(*args))
+        self.assertEqual(self.run_cli(*args), "")
+        self.assertEqual(self.run_cli(*args, "--exclude-session", "abc"), "")
 
     def test_show_and_status(self):
         ev = add(self.conn)["id"]
