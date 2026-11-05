@@ -30,6 +30,13 @@ CREATE TABLE IF NOT EXISTS events (
 );
 CREATE INDEX IF NOT EXISTS ix_events_created ON events(created_at);
 CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS consumers (
+  name       TEXT PRIMARY KEY,                    -- one per Claude session / role
+  filters    TEXT NOT NULL,                       -- JSON, see consumers.Filters
+  cursor     INTEGER NOT NULL,                    -- last events.seq delivered by watch
+  created_at TEXT NOT NULL,
+  last_seen  TEXT
+);
 """
 
 EVENT_COLUMNS = ("id", "source", "type", "reason", "repo", "actor", "title", "url",
