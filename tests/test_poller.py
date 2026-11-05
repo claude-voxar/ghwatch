@@ -5,7 +5,7 @@ import tempfile
 import textwrap
 import unittest
 
-from ghwatch import poller, repos, store
+from ghwatch import normalize, poller, repos, store
 from ghwatch.github import Response
 from tests.helpers import memdb
 
@@ -155,6 +155,60 @@ class PollOnceTest(unittest.TestCase):
     def test_server_hint_propagates(self):
         gh = self.gh(**{"/notifications": ok([], **{"X-Poll-Interval": "180"})})
         self.assertEqual(poller.poll_once(self.conn, gh, "me")[1], 180)
+
+
+def push(id_, created="2026-11-05T10:00:00Z"):
+    return {"id": id_, "type": "PushEvent", "actor": {"login": "bob"}, "repo": {"name": "acme/app"},
+            "created_at": created, "payload": {"ref": "refs/heads/main"}}
+
+
+def page(items, next_page=None, **headers):
+    if next_page:
+        headers["Link"] = f'<https://api.github.com/users/me/events?page={next_page}>; rel="next"'
+    return ok(items, **headers)
+
+
+class PaginationTest(unittest.TestCase):
+    def setUp(self):
+        self.conn = memdb()
+
+    def poll_own(self, pages):
+        gh = FakeGitHub({"/notifications": NOT_MODIFIED, "/users/me/received_events": NOT_MODIFIED,
+                         "/users/me/events": pages})
+        new, _ = poller.poll_once(self.conn, gh, "me")
+        return new, [c[0] for c in gh.calls].count("/users/me/events")
+
+    def test_follows_pages_until_known_event(self):
+        store.insert_event(self.conn, normalize.event_row(push("1"), "own", "me", store.now_iso()))
+        new, requests = self.poll_own([page([push("5"), push("4")], 2, ETag="E"),
+                                       page([push("3"), push("1")], 3),   # reaches stored "1"
+                                       page([push("0")])])
+        self.assertEqual((new, requests), (3, 2))
+        self.assertIsNotNone(store.get_event(self.conn, "e:3"))
+        self.assertIsNone(store.get_event(self.conn, "e:0"))
+
+    def test_page_cap(self):
+        pages = [page([push(str(i))], i + 2) for i in range(poller.MAX_EVENT_PAGES + 2)]
+        new, requests = self.poll_own(pages)
+        self.assertEqual((new, requests), (poller.MAX_EVENT_PAGES, poller.MAX_EVENT_PAGES))
+
+    def test_stops_at_retention_boundary(self):
+        new, requests = self.poll_own([page([push("2"), push("1", "2001-01-01T00:00:00Z")], 2),
+                                       page([push("0")])])
+        self.assertEqual((new, requests), (1, 1))
+
+    def test_inserted_oldest_first_across_pages(self):
+        self.poll_own([page([push("b", "2026-11-05T10:02:00Z")], 2),
+                       page([push("a", "2026-11-05T10:01:00Z")])])
+        self.assertEqual([r["id"] for r in store.events_after(self.conn, 0)], ["e:a", "e:b"])
+
+    def test_notifications_paginate(self):
+        n2 = dict(notif("2"), updated_at="2026-11-05T09:00:00Z")
+        gh = FakeGitHub({"/notifications": [ok([notif("1")], Link='<https://api.github.com/notifications?page=2>; rel="next"'),
+                                            ok([n2])],
+                         "/users/me/received_events": NOT_MODIFIED, "/users/me/events": NOT_MODIFIED})
+        new, _ = poller.poll_once(self.conn, gh, "me")
+        self.assertEqual(new, 2)
 
 
 class LockTest(unittest.TestCase):
