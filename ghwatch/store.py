@@ -37,6 +37,12 @@ CREATE TABLE IF NOT EXISTS consumers (
   created_at TEXT NOT NULL,
   last_seen  TEXT
 );
+CREATE TABLE IF NOT EXISTS claims (
+  event_id   TEXT PRIMARY KEY,                    -- at most one owner per item
+  consumer   TEXT NOT NULL,
+  claimed_at TEXT NOT NULL,
+  done_at    TEXT
+);
 """
 
 EVENT_COLUMNS = ("id", "source", "type", "reason", "repo", "actor", "title", "url",
@@ -118,4 +124,6 @@ def max_seq(conn):
 def prune(conn, days=RETENTION_DAYS, now=None):
     """Delete events older than `days`. Returns the number removed."""
     cutoff = ((now or utcnow()) - timedelta(days=days)).strftime(TS_FORMAT)
-    return conn.execute("DELETE FROM events WHERE created_at < ?", (cutoff,)).rowcount
+    n = conn.execute("DELETE FROM events WHERE created_at < ?", (cutoff,)).rowcount
+    conn.execute("DELETE FROM claims WHERE event_id NOT IN (SELECT id FROM events)")
+    return n
