@@ -27,7 +27,8 @@ class DeployTest(unittest.TestCase):
         git(t, "clone", "-q", "--bare", self.work, self.origin)
         git(self.work, "remote", "add", "origin", self.origin)
         git(t, "clone", "-q", self.origin, self.prod)
-        self.env = dict(os.environ, GHWATCH_HOME=os.path.join(t, "home"),
+        self.skills = os.path.join(t, "claude-skills")
+        self.env = dict(os.environ, GHWATCH_HOME=os.path.join(t, "home"), CLAUDE_SKILLS_DIR=self.skills,
                         GHWATCH_DEPLOY_TEST_CMD="python3 -m compileall -q ghwatch")
 
     def tearDown(self):
@@ -50,6 +51,24 @@ class DeployTest(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("->", r.stdout)
         self.assertEqual(git(self.prod, "rev-parse", "HEAD"), git(self.origin, "rev-parse", "main"))
+
+    def test_links_skills(self):
+        self.push_change("\n# ok\n")
+        self.assertEqual(self.deploy().returncode, 0)
+        link = os.path.join(self.skills, "watch-repo")
+        self.assertTrue(os.path.islink(link))
+        self.assertEqual(os.path.realpath(link),
+                         os.path.realpath(os.path.join(self.prod, "skills", "watch-repo")))
+        self.assertTrue(os.path.exists(os.path.join(link, "SKILL.md")))
+
+    def test_does_not_replace_a_real_skill_dir(self):
+        mine = os.path.join(self.skills, "watch-repo")
+        os.makedirs(mine)
+        self.push_change("\n# ok\n")
+        r = self.deploy()
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("not a symlink; leaving it alone", r.stderr)
+        self.assertFalse(os.path.islink(mine))
 
     def test_failing_tests_roll_back(self):
         before = git(self.prod, "rev-parse", "HEAD")
