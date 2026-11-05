@@ -162,7 +162,7 @@ def cmd_poll(args):
     logging.Formatter.converter = time.gmtime  # match the UTC timestamps in the DB
     logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(message)s",
                         datefmt=store.TS_FORMAT)
-    if not poller.run(home(), GitHub(), once=args.once):
+    if not poller.run(home(), GitHub(), once=args.once, wait_for_lock=args.wait_lock):
         print("poller already running; exiting", file=sys.stderr)
 
 
@@ -372,7 +372,10 @@ def build_parser():
             p.add_argument("ids", nargs="+", metavar="ID")
         return p
 
-    add("poll", cmd_poll).add_argument("--once", action="store_true")
+    p = add("poll", cmd_poll)
+    p.add_argument("--once", action="store_true")
+    p.add_argument("--wait-lock", action="store_true",
+                   help="if another poller is active, wait and take over when it exits")
     add("ensure-poller", cmd_ensure_poller)
     add("stop-poller", cmd_stop_poller)
     add("restart-poller", cmd_restart_poller)

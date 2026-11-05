@@ -27,12 +27,16 @@ def lock_path(home):
     return os.path.join(home, "poller.lock")
 
 
-def acquire_lock(home):
-    """Return an open file holding the poller lock, or None if already held."""
+def acquire_lock(home, wait=False):
+    """Return an open file holding the poller lock.
+
+    If another poller holds it: return None, or with wait=True block until
+    it is released (a standby poller that takes over when the active one dies).
+    """
     os.makedirs(home, exist_ok=True)
     fh = open(lock_path(home), "a+")
     try:
-        fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fcntl.flock(fh, fcntl.LOCK_EX if wait else fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
         fh.close()
         return None
@@ -183,8 +187,10 @@ def poll_once(conn, gh, login, sources=None):
     return new_total, hint
 
 
-def run(home, gh, once=False, sleep=time.sleep):
-    lock = acquire_lock(home)
+def run(home, gh, once=False, sleep=time.sleep, wait_for_lock=False):
+    if wait_for_lock and is_running(home):
+        log.info("another poller is active; standing by until it exits")
+    lock = acquire_lock(home, wait=wait_for_lock)
     if lock is None:
         log.info("poller already running for %s; exiting", home)
         return False

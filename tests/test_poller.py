@@ -179,6 +179,27 @@ class LockTest(unittest.TestCase):
             self.assertFalse(poller.is_running(home))
 
 
+class WaitLockTest(unittest.TestCase):
+    def test_standby_takes_over_when_holder_exits(self):
+        with tempfile.TemporaryDirectory() as home:
+            held = poller.acquire_lock(home)
+            code = textwrap.dedent(f"""
+                import sys; sys.path.insert(0, {os.getcwd()!r})
+                from ghwatch import poller
+                lock = poller.acquire_lock({home!r}, wait=True)
+                print("acquired", flush=True)
+            """)
+            proc = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE, text=True)
+            try:
+                with self.assertRaises(subprocess.TimeoutExpired):
+                    proc.wait(timeout=0.5)  # still blocked while we hold the lock
+                held.close()
+                out, _ = proc.communicate(timeout=5)
+                self.assertEqual(out.strip(), "acquired")
+            finally:
+                proc.kill()
+
+
 class StopTest(unittest.TestCase):
     def test_stop_terminates_a_real_poller_process(self):
         with tempfile.TemporaryDirectory() as home:
