@@ -33,7 +33,9 @@ if ! ${GHWATCH_DEPLOY_TEST_CMD:-make -s test} >"$log" 2>&1; then
   exit 1
 fi
 
-if [ -n "$(bin/ghwatch status | grep '"poller_running": true')" ]; then
+# Restart if a poller is running or the launchd agent is installed (the
+# agent must be kicked onto the new code even if it is between processes).
+if bin/ghwatch status | grep -Eq '"poller_running": true|"installed": true'; then
   bin/ghwatch restart-poller
 fi
 echo "deploy: ${before:0:7} -> ${after:0:7}"

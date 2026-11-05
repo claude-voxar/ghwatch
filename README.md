@@ -89,6 +89,7 @@ ghwatch consumers
 ghwatch status
 ghwatch poll [--once]
 ghwatch ensure-poller | stop-poller | restart-poller
+ghwatch install-agent | uninstall-agent
 ghwatch forget-consumer NAME
 ghwatch track OWNER/NAME... -c NAME | untrack OWNER/NAME... | tracked
 ghwatch scan-transcripts [--follow] [--exclude-session ID] [--from-start]
@@ -126,7 +127,15 @@ ghwatch scan-transcripts --follow --exclude-session <maintainer-session-id> 2>&1
 ghwatch stop-poller
 ghwatch restart-poller
 ghwatch forget-consumer NAME
+ghwatch install-agent
+ghwatch uninstall-agent
 ```
+
+### launchd agent
+
+`ghwatch install-agent` installs `~/Library/LaunchAgents/com.github.claude-voxar.ghwatch.poller.plist`, which runs `ghwatch poll --wait-lock` with `KeepAlive`. Polling then continues through crashes and reboots, and while no session is watching. A poller that a watcher starts while the agent is running waits on the lock rather than competing.
+
+With the agent installed, `restart-poller` (and so `bin/deploy`) restarts the agent onto the new code and retires any other poller. Run `install-agent` from the production checkout, because the plist points at the checkout it was run from.
 
 `~/ghwatch` is the production checkout and always stays on `main`. Do development in a separate worktree, such as `git worktree add ~/ghwatch-dev <branch>`. Editing or switching branches in the production checkout would change the code under every running watcher.
 
