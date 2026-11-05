@@ -10,6 +10,7 @@
   done ID... -c NAME [--read] mark handled (--read also marks the GitHub thread read)
   show ID                     full record incl. raw GitHub JSON
   consumers                   registered consumers and their filters
+  forget-consumer NAME        remove a consumer (its claims are kept)
   status                      poller health and counts
 
 Filters (repeatable; OR within a flag, AND across flags; globs, case-insensitive):
@@ -243,6 +244,11 @@ def cmd_consumers(args):
         print("(no consumers)")
 
 
+def cmd_forget_consumer(args):
+    ok = consumers.forget(db(), args.name)
+    print(f"{args.name}: {'forgotten' if ok else 'no such consumer'}")
+
+
 def cmd_status(args):
     conn = db()
     count = lambda q: conn.execute(q).fetchone()[0]  # noqa: E731
@@ -300,6 +306,7 @@ def build_parser():
         "--read", action="store_true", help="also mark the GitHub notification thread read")
     add("show", cmd_show).add_argument("id")
     add("consumers", cmd_consumers)
+    add("forget-consumer", cmd_forget_consumer).add_argument("name")
     add("status", cmd_status)
     return ap
 

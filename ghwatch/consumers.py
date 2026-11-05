@@ -97,3 +97,8 @@ def take_new(conn, consumer):
 
 def list_all(conn):
     return conn.execute("SELECT * FROM consumers ORDER BY name").fetchall()
+
+
+def forget(conn, name):
+    """Remove a consumer. Its claims stay so other sessions still see who handled what."""
+    return conn.execute("DELETE FROM consumers WHERE name=?", (name,)).rowcount == 1
