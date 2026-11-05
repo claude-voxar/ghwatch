@@ -54,6 +54,14 @@ class GitHubTest(unittest.TestCase):
         client.request("GET", "/x")
         self.assertEqual(http.requests[1].get_header("Authorization"), "Bearer new")
 
+    def test_next_path_from_link_header(self):
+        link = ('<https://api.github.com/user/1/events?per_page=100&page=2>; rel="next", '
+                '<https://api.github.com/user/1/events?per_page=100&page=3>; rel="last"')
+        r = GitHub(lambda: "t", FakeHTTP(FakeResp(200, [], {"Link": link}))).request("GET", "/")
+        self.assertEqual(r.next_path, "/user/1/events?per_page=100&page=2")
+        last_page = GitHub(lambda: "t", FakeHTTP(FakeResp(200, [], {"Link": '<x>; rel="prev"'}))).request("GET", "/")
+        self.assertIsNone(last_page.next_path)
+
     def test_poll_interval_defaults_on_garbage(self):
         r = GitHub(lambda: "t", FakeHTTP(FakeResp(200, {}, {"X-Poll-Interval": "x"}))).request("GET", "/")
         self.assertEqual(r.poll_interval(60), 60)

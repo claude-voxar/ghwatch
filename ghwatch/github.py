@@ -4,6 +4,7 @@ Supports conditional requests (ETag / If-Modified-Since): a 304 does not
 count against the rate limit, which keeps frequent polling cheap.
 """
 import json
+import re
 import subprocess
 import urllib.error
 import urllib.request
@@ -20,6 +21,15 @@ class Response:
     @property
     def not_modified(self):
         return self.status == 304
+
+    @property
+    def next_path(self):
+        """API path of the next page from the Link header, or None."""
+        m = re.search(r'<([^>]+)>;\s*rel="next"', self.headers.get("Link") or "")
+        if not m:
+            return None
+        url = m.group(1)
+        return url[len(API):] if url.startswith(API) else url
 
     def poll_interval(self, default):
         try:
