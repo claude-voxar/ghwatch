@@ -117,16 +117,27 @@ def poll_notifications(conn, gh, login):
     return new, r
 
 
-def _event_poller(source, path_fmt, etag_key=None):
+def _event_poller(source, path_fmt, etag_key=None, backfill_before=None):
+    """Poll an activity feed.
+
+    backfill_before (ISO timestamp): on the feed's first sync, events created
+    before it are stored as backfill, i.e. history rather than news, so that
+    tracking a busy repo doesn't stream months of old events to watchers.
+    """
     def poll(conn, gh, login):
         key = etag_key or f"etag:{source}"
-        r = gh.request("GET", path_fmt.format(login=login), etag=store.get_state(conn, key))
+        etag = store.get_state(conn, key)
+        r = gh.request("GET", path_fmt.format(login=login), etag=etag)
         if r.not_modified:
             return 0, r
         fetched = store.now_iso()
+        first_sync = etag is None and backfill_before is not None
         events = sorted(r.body or [], key=lambda e: e["created_at"])
-        new = sum(store.insert_event(conn, normalize.event_row(e, source, login, fetched))
-                  for e in events)
+        new = 0
+        for e in events:
+            row = normalize.event_row(e, source, login, fetched)
+            row["backfill"] = int(first_sync and row["created_at"] < backfill_before)
+            new += store.insert_event(conn, row)
         if r.headers.get("ETag"):
             store.set_state(conn, key, r.headers["ETag"])
         return new, r
@@ -134,8 +145,9 @@ def _event_poller(source, path_fmt, etag_key=None):
     return poll
 
 
-def repo_poller(repo):
-    poll = _event_poller("repo", f"/repos/{repo}/events?per_page=100", etag_key=f"etag:repo:{repo}")
+def repo_poller(repo, tracked_at=None):
+    poll = _event_poller("repo", f"/repos/{repo}/events?per_page=100",
+                         etag_key=f"etag:repo:{repo}", backfill_before=tracked_at)
     poll.__name__ = f"poll_repo_events({repo})"
     poll.repo = repo
     return poll
@@ -143,7 +155,7 @@ def repo_poller(repo):
 
 def current_sources(conn):
     """Static feeds plus one per tracked repo; re-read every poll so `track` applies live."""
-    return SOURCES + tuple(repo_poller(r["repo"]) for r in repos.list_tracked(conn))
+    return SOURCES + tuple(repo_poller(r["repo"], r["added_at"]) for r in repos.list_tracked(conn))
 
 
 SOURCES = (

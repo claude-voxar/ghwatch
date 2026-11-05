@@ -26,7 +26,8 @@ CREATE TABLE IF NOT EXISTS events (
   created_at  TEXT NOT NULL,                      -- GitHub timestamp, UTC
   fetched_at  TEXT NOT NULL,
   actionable  INTEGER NOT NULL DEFAULT 0,
-  payload     TEXT                                -- raw GitHub JSON
+  payload     TEXT,                               -- raw GitHub JSON
+  backfill    INTEGER NOT NULL DEFAULT 0          -- history from a repo's first sync; not streamed
 );
 CREATE INDEX IF NOT EXISTS ix_events_created ON events(created_at);
 CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value TEXT);
@@ -51,7 +52,12 @@ CREATE TABLE IF NOT EXISTS claims (
 """
 
 EVENT_COLUMNS = ("id", "source", "type", "reason", "repo", "actor", "title", "url",
-                 "created_at", "fetched_at", "actionable", "payload")
+                 "created_at", "fetched_at", "actionable", "payload", "backfill")
+
+# Columns added after the first release: (table, column, definition).
+MIGRATIONS = (
+    ("events", "backfill", "INTEGER NOT NULL DEFAULT 0"),
+)
 
 
 def default_home():
@@ -81,7 +87,16 @@ def connect(path=None):
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=30000")
     conn.executescript(SCHEMA)
+    migrate(conn)
     return conn
+
+
+def migrate(conn):
+    """Add columns that databases created by older versions lack."""
+    for table, column, definition in MIGRATIONS:
+        existing = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+        if column not in existing:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 
 @contextlib.contextmanager
@@ -107,6 +122,7 @@ def set_state(conn, key, value):
 
 def insert_event(conn, row):
     """Insert a normalized event dict. Returns True if it was new."""
+    row = dict(row, backfill=int(row.get("backfill") or 0))
     values = tuple(row.get(c) for c in EVENT_COLUMNS)
     cur = conn.execute(
         f"INSERT OR IGNORE INTO events({', '.join(EVENT_COLUMNS)}) "

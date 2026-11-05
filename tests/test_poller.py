@@ -114,6 +114,27 @@ class PollOnceTest(unittest.TestCase):
         poller.poll_once(self.conn, gh2, "me")
         self.assertIn(("/repos/other/lib/events", "L1", None), gh2.calls)
 
+    def test_first_sync_of_tracked_repo_is_backfill(self):
+        repos.track(self.conn, "other/lib", "a")
+        tracked_at = repos.list_tracked(self.conn)[0]["added_at"]
+
+        def ev(id_, created):
+            return {"id": id_, "type": "PullRequestEvent", "actor": {"login": "bob"},
+                    "repo": {"name": "other/lib"}, "created_at": created,
+                    "payload": {"action": "opened", "number": 1, "pull_request": {"number": 1}}}
+
+        live = "9999-01-01T00:00:00Z"  # created after tracking started
+        gh = self.gh(**{"/repos/other/lib/events": ok([ev("old", "2026-10-13T09:00:00Z"), ev("live", live)],
+                                                     ETag="L1")})
+        poller.poll_once(self.conn, gh, "me")
+        self.assertEqual(store.get_event(self.conn, "e:old")["backfill"], 1)
+        self.assertEqual(store.get_event(self.conn, "e:live")["backfill"], 0)
+        self.assertLess("2026-10-13T09:00:00Z", tracked_at)
+        # later syncs (ETag known) are never backfill
+        gh2 = self.gh(**{"/repos/other/lib/events": ok([ev("later", "2026-10-14T00:00:00Z")], ETag="L2")})
+        poller.poll_once(self.conn, gh2, "me")
+        self.assertEqual(store.get_event(self.conn, "e:later")["backfill"], 0)
+
     def test_broken_tracked_repo_does_not_make_poller_unhealthy(self):
         repos.track(self.conn, "acme/typo", "a")
         gh = self.gh(**{"/repos/acme/typo/events": RuntimeError("HTTP Error 404: Not Found")})

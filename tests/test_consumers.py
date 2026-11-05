@@ -71,6 +71,16 @@ class ConsumerTest(unittest.TestCase):
         consumers.register(self.conn, "a", Filters(repo=["y/*"]))
         self.assertEqual(consumers.register(self.conn, "a").filters, Filters(repo=["y/*"]))
 
+    def test_backfill_skipped_unless_requested(self):
+        c = consumers.register(self.conn, "a")
+        add(self.conn, id="hist", backfill=1)
+        news = add(self.conn, id="news")
+        self.assertEqual([r["id"] for r in consumers.take_new(self.conn, c)], [news["id"]])
+        replay = consumers.register(self.conn, "b")
+        replay.cursor = 0
+        self.assertEqual([r["id"] for r in consumers.take_new(self.conn, replay, include_backfill=True)],
+                         ["hist", "news"])
+
     def test_forget(self):
         consumers.register(self.conn, "a", Filters(repo=["x/*"]))
         self.assertTrue(consumers.forget(self.conn, "a"))

@@ -85,14 +85,17 @@ def register(conn, name, filters=None):
     return Consumer(name, f, row["cursor"])
 
 
-def take_new(conn, consumer):
-    """Return matching rows added since the consumer's cursor and advance it."""
+def take_new(conn, consumer, include_backfill=False):
+    """Return matching rows added since the consumer's cursor and advance it.
+
+    Backfill (history from a repo's first sync) is skipped unless asked for.
+    """
     rows = store.events_after(conn, consumer.cursor)
     if rows:
         consumer.cursor = rows[-1]["seq"]
     conn.execute("UPDATE consumers SET cursor=?, last_seen=? WHERE name=?",
                  (consumer.cursor, store.now_iso(), consumer.name))
-    return [r for r in rows if consumer.filters.matches(r)]
+    return [r for r in rows if (include_backfill or not r["backfill"]) and consumer.filters.matches(r)]
 
 
 def list_all(conn):
