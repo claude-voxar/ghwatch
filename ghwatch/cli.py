@@ -106,8 +106,9 @@ def cmd_watch(args):
 # ------------------------------------------------------------------ other commands
 
 def cmd_poll(args):
+    logging.Formatter.converter = time.gmtime  # match the UTC timestamps in the DB
     logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(message)s",
-                        datefmt="%Y-%m-%dT%H:%M:%S")
+                        datefmt=store.TS_FORMAT)
     if not poller.run(home(), GitHub(), once=args.once):
         print("poller already running; exiting", file=sys.stderr)
 
