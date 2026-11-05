@@ -43,10 +43,9 @@ class ClaimsTest(unittest.TestCase):
         self.assertTrue(claims.claim(self.conn, self.ev, "b").ok)
 
     def test_prune_drops_orphaned_claims(self):
-        old = (store.utcnow() - timedelta(days=40)).strftime(store.TS_FORMAT)
-        stale = add(self.conn, created_at=old)["id"]
+        stale = add(self.conn)["id"]
         claims.claim(self.conn, stale, "a")
-        store.prune(self.conn)
+        store.prune(self.conn, now=store.utcnow() + timedelta(days=40))
         self.assertIsNone(claims.get(self.conn, stale))
 
 
