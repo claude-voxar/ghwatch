@@ -111,7 +111,15 @@ ghwatch restart-poller
 ghwatch forget-consumer NAME
 ```
 
-Deploy by running `git pull`, `make test` and `ghwatch restart-poller`. Running watchers detect the code change, print `GHWATCH-UPGRADED` and exit, so their sessions know to re-arm.
+`~/ghwatch` is the production checkout and always stays on `main`. Do development in a separate worktree, such as `git worktree add ~/ghwatch-dev <branch>`. Editing or switching branches in the production checkout would change the code under every running watcher.
+
+To deploy after a merge:
+
+```bash
+~/ghwatch/bin/deploy
+```
+
+The script fast-forwards `main` and runs the tests on this host. If they fail, it rolls back. If they pass, it restarts the poller. Running watchers detect the code change, print `GHWATCH-UPGRADED` and exit, so their sessions know to re-arm.
 
 ## Development
 
