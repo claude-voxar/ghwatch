@@ -7,7 +7,7 @@ import time
 import unittest
 from datetime import timedelta
 
-from ghwatch import cli, claims, consumers, store
+from ghwatch import cli, claims, consumers, repos, store
 from ghwatch.consumers import Filters
 from tests.helpers import add, memdb
 
@@ -120,6 +120,17 @@ class EndToEndTest(unittest.TestCase):
             proc.kill()
         self.assertEqual(proc.returncode, 0)
         self.assertIn("GHWATCH-UPGRADED", out)
+
+    def test_track_commands_and_auto_track(self):
+        self.assertIn("tracking", self.run_cli("track", "acme/lib", "-c", "a"))
+        self.assertIn("already tracked", self.run_cli("track", "ACME/lib", "-c", "a"))
+        self.assertIn("not an owner/name", self.run_cli("track", "acme", "-c", "a"))
+        self.run_cli("inbox", "-c", "b", "--repo", "acme/app", "--repo", "acme/*")
+        tracked = self.run_cli("tracked")
+        self.assertIn("acme/app (added by b", tracked)
+        self.assertNotIn("acme/*", tracked)
+        self.assertIn("untracked", self.run_cli("untrack", "acme/lib"))
+        self.assertEqual([r["repo"] for r in repos.list_tracked(self.conn)], ["acme/app"])
 
     def test_show_and_status(self):
         ev = add(self.conn)["id"]

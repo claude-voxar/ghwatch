@@ -11,11 +11,15 @@
   show ID                     full record incl. raw GitHub JSON
   consumers                   registered consumers and their filters
   forget-consumer NAME        remove a consumer (its claims are kept)
+  track REPO... -c NAME       poll owner/name's event feed directly
+  untrack REPO... / tracked   stop following / list followed repos
+
+An exact --repo filter (no wildcards) on watch/inbox tracks that repo automatically.
   status                      poller health and counts
 
 Filters (repeatable; OR within a flag, AND across flags; globs, case-insensitive):
   --repo 'owner/*' --type PullRequest --reason review_requested
-  --source notification|received|own --actor login --match 'title text'
+  --source notification|received|own|repo --actor login --match 'title text'
   --all-events  include non-actionable activity (pushes, releases, ...)
 A consumer's filters are saved on first use; passing filters again replaces them.
 """
@@ -26,7 +30,7 @@ import os
 import sys
 import time
 
-from ghwatch import claims, consumers, poller, store
+from ghwatch import claims, consumers, poller, repos, store
 from ghwatch.consumers import Filters
 from ghwatch.github import GitHub
 
@@ -55,6 +59,19 @@ def format_row(row, claim=None):
 def filters_from(args):
     fields = {k: getattr(args, k) for k in Filters.FIELDS if getattr(args, k, None)}
     return Filters(all_events=args.all_events, **fields)
+
+
+def auto_track(conn, consumer):
+    """Follow every exact --repo a consumer filters on, so its events actually arrive."""
+    for pattern in consumer.filters.fields.get("repo", []):
+        if repos.is_exact(pattern) and repos.track(conn, pattern, consumer.name):
+            print(f"ghwatch: now tracking {pattern}", file=sys.stderr, flush=True)
+
+
+def register(conn, args):
+    consumer = consumers.register(conn, args.consumer, filters_from(args))
+    auto_track(conn, consumer)
+    return consumer
 
 
 # ------------------------------------------------------------------ watch
@@ -103,7 +120,7 @@ def code_fingerprint(package_dir=PACKAGE_DIR):
 
 def cmd_watch(args):
     conn = db()
-    consumer = consumers.register(conn, args.consumer, filters_from(args))
+    consumer = register(conn, args)
     if args.backlog:
         consumer.cursor = 0
     started = time.time()
@@ -161,7 +178,7 @@ def cmd_restart_poller(args):
 
 def cmd_inbox(args):
     conn = db()
-    consumer = consumers.register(conn, args.consumer, filters_from(args))
+    consumer = register(conn, args)
     shown = 0
     for row in conn.execute("SELECT * FROM events ORDER BY created_at DESC"):
         if not consumer.filters.matches(row):
@@ -244,6 +261,31 @@ def cmd_consumers(args):
         print("(no consumers)")
 
 
+def cmd_track(args):
+    conn = db()
+    for repo in args.repos:
+        try:
+            added = repos.track(conn, repo, args.consumer)
+        except ValueError as ex:
+            print(f"{repo}: {ex}")
+            continue
+        print(f"{repo}: {'tracking' if added else 'already tracked'}")
+
+
+def cmd_untrack(args):
+    conn = db()
+    for repo in args.repos:
+        print(f"{repo}: {'untracked' if repos.untrack(conn, repo) else 'was not tracked'}")
+
+
+def cmd_tracked(args):
+    rows = repos.list_tracked(db())
+    for r in rows:
+        print(f"{r['repo']} (added by {r['added_by']} at {r['added_at']})")
+    if not rows:
+        print("(no tracked repos)")
+
+
 def cmd_forget_consumer(args):
     ok = consumers.forget(db(), args.name)
     print(f"{args.name}: {'forgotten' if ok else 'no such consumer'}")
@@ -263,6 +305,7 @@ def cmd_status(args):
         "actionable": count("SELECT count(*) FROM events WHERE actionable=1"),
         "open_claims": count("SELECT count(*) FROM claims WHERE done_at IS NULL"),
         "consumers": count("SELECT count(*) FROM consumers"),
+        "tracked_repos": count("SELECT count(*) FROM tracked_repos"),
         "oldest_event": count("SELECT min(created_at) FROM events"),
     }, indent=2))
 
@@ -307,6 +350,9 @@ def build_parser():
     add("show", cmd_show).add_argument("id")
     add("consumers", cmd_consumers)
     add("forget-consumer", cmd_forget_consumer).add_argument("name")
+    add("track", cmd_track, consumer=True).add_argument("repos", nargs="+", metavar="OWNER/NAME")
+    add("untrack", cmd_untrack).add_argument("repos", nargs="+", metavar="OWNER/NAME")
+    add("tracked", cmd_tracked)
     add("status", cmd_status)
     return ap
 
