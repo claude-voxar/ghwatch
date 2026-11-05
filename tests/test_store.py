@@ -23,13 +23,17 @@ class StoreTest(unittest.TestCase):
         rows = store.events_after(self.conn, 1)
         self.assertEqual([r["id"] for r in rows], [b["id"], c["id"]])
 
+    def test_insert_ignores_events_past_retention(self):
+        old = (store.utcnow() - timedelta(days=31)).strftime(store.TS_FORMAT)
+        self.assertFalse(store.insert_event(self.conn, make_event(id="old", created_at=old)))
+        self.assertIsNone(store.get_event(self.conn, "old"))
+
     def test_prune_removes_only_rows_past_retention(self):
         now = store.utcnow()
-        old = (now - timedelta(days=31)).strftime(store.TS_FORMAT)
-        edge = (now - timedelta(days=29)).strftime(store.TS_FORMAT)
-        add(self.conn, id="old", created_at=old)
-        add(self.conn, id="recent", created_at=edge)
-        self.assertEqual(store.prune(self.conn, now=now), 1)
+        add(self.conn, id="old", created_at=(now - timedelta(days=29, hours=12)).strftime(store.TS_FORMAT))
+        add(self.conn, id="recent", created_at=(now - timedelta(days=1)).strftime(store.TS_FORMAT))
+        # a day passes: "old" is 30.5 days old, "recent" 2 days
+        self.assertEqual(store.prune(self.conn, now=now + timedelta(days=1)), 1)
         self.assertIsNone(store.get_event(self.conn, "old"))
         self.assertIsNotNone(store.get_event(self.conn, "recent"))
 

@@ -120,8 +120,18 @@ def set_state(conn, key, value):
                  "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, value))
 
 
+def retention_cutoff(days=RETENTION_DAYS, now=None):
+    return ((now or utcnow()) - timedelta(days=days)).strftime(TS_FORMAT)
+
+
 def insert_event(conn, row):
-    """Insert a normalized event dict. Returns True if it was new."""
+    """Insert a normalized event dict. Returns True if it was new.
+
+    Events already past retention are ignored: storing them would only get
+    them pruned and then re-inserted (and re-announced) on the next fetch.
+    """
+    if row["created_at"] < retention_cutoff():
+        return False
     row = dict(row, backfill=int(row.get("backfill") or 0))
     values = tuple(row.get(c) for c in EVENT_COLUMNS)
     cur = conn.execute(
@@ -144,7 +154,7 @@ def max_seq(conn):
 
 def prune(conn, days=RETENTION_DAYS, now=None):
     """Delete events older than `days`. Returns the number removed."""
-    cutoff = ((now or utcnow()) - timedelta(days=days)).strftime(TS_FORMAT)
+    cutoff = retention_cutoff(days, now)
     n = conn.execute("DELETE FROM events WHERE created_at < ?", (cutoff,)).rowcount
     conn.execute("DELETE FROM claims WHERE event_id NOT IN (SELECT id FROM events)")
     return n
