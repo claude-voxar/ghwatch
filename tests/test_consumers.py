@@ -34,6 +34,29 @@ class FiltersTest(unittest.TestCase):
             Filters(colour=["red"])
 
 
+class ExcludeTest(unittest.TestCase):
+    f = Filters(all_events=True, exclude=["actor=bot,type=PullRequestReview*", "repo=acme/secret"])
+
+    def test_rule_drops_rows_matching_all_its_fields(self):
+        self.assertFalse(self.f.matches(make_event(actor="Bot", type="PullRequestReviewEvent")))
+        self.assertFalse(self.f.matches(make_event(repo="acme/secret")))  # rules are OR-ed
+
+    def test_partial_match_is_kept(self):
+        self.assertTrue(self.f.matches(make_event(actor="bot", type="PullRequestEvent")))
+        self.assertTrue(self.f.matches(make_event(actor="alice", type="PullRequestReviewEvent")))
+        self.assertTrue(self.f.matches(make_event(actor=None, type="PullRequestReviewEvent")))
+
+    def test_saved_with_filters(self):
+        g = Filters.from_json(self.f.to_json())
+        self.assertEqual(g, self.f)
+        self.assertEqual(g.exclude[0], {"actor": "bot", "type": "pullrequestreview*"})
+
+    def test_bad_rules_rejected(self):
+        for bad in ["actor", "colour=red", "actor=", "actor=bot,"]:
+            with self.assertRaises(ValueError, msg=bad):
+                Filters(exclude=[bad])
+
+
 def push(actor="me", late_by=7200, type="PushEvent"):
     """An event fetched `late_by` seconds after GitHub says it happened."""
     now = store.utcnow()
