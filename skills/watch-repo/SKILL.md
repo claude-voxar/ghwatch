@@ -30,6 +30,7 @@ If you already armed a watch earlier in this conversation, reuse its name. That 
 - A wildcard `--repo 'org/*'` only matches repos that are already tracked or followed.
 - GitHub sends conversation comments on PRs and on issues both as `IssueCommentEvent`. The summary line says `commented on PR #n` or `commented on issue #n`, so you can tell them apart.
 - `--actor LOGIN` and `--match TEXT` (a title substring) narrow the results further.
+- To drop your own echoes of one kind while keeping others, add an exclusion rule. The fields in one rule must all match, and rules can be repeated. For example, a reviewer that wants PRs opened by other sessions but not its own reviews and comments uses `--exclude actor=claude-voxar,type='PullRequestReview*' --exclude actor=claude-voxar,type=IssueCommentEvent`. Don't exclude `actor=claude-voxar` alone: every session here acts as that account, so you would miss their PRs too.
 - When the watch includes push or branch events (everything in the repo, or `--type PushEvent`), add `--skip-late-echoes`. GitHub delivers those events hours late, and the late copies of pushes made by `claude-voxar` (any session here) would wake you with nothing to do.
 
 If you're unsure what the user wants, use "everything in the repo".
