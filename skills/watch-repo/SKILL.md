@@ -30,6 +30,7 @@ If you already armed a watch earlier in this conversation, reuse its name. That 
 - A wildcard `--repo 'org/*'` only matches repos that are already tracked or followed.
 - GitHub sends conversation comments on PRs and on issues both as `IssueCommentEvent`. The summary line says `commented on PR #n` or `commented on issue #n`, so you can tell them apart.
 - `--actor LOGIN` and `--match TEXT` (a title substring) narrow the results further.
+- When the watch includes push or branch events (everything in the repo, or `--type PushEvent`), add `--skip-late-echoes`. GitHub delivers those events hours late, and the late copies of pushes made by `claude-voxar` (any session here) would wake you with nothing to do.
 
 If you're unsure what the user wants, use "everything in the repo".
 
@@ -47,7 +48,7 @@ Always keep `2>&1`, so that crashes reach you.
 
 The first output may be `ghwatch: now tracking OWNER/NAME`, which is expected. If you see `OWNER/NAME not found on GitHub`, the name is wrong or `claude-voxar` has no access. Tell the user rather than continuing.
 
-Events arrive one to five minutes after they happen. Push and branch events can arrive hours late. To know when CI finishes, use `gh pr checks`, not this watch.
+Events arrive one to five minutes after they happen. Push and branch events can arrive hours late. `--skip-late-echoes` hides those late copies when the push was ours. To know when CI finishes, use `gh pr checks`, not this watch.
 
 ## 4. Handle each event line
 
