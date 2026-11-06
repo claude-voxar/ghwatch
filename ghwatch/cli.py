@@ -63,7 +63,8 @@ def format_row(row, claim=None):
 
 def filters_from(args):
     fields = {k: getattr(args, k) for k in Filters.FIELDS if getattr(args, k, None)}
-    return Filters(all_events=args.all_events, **fields)
+    return Filters(all_events=args.all_events,
+                   skip_late_echoes=getattr(args, "skip_late_echoes", False), **fields)
 
 
 def verify_repo(repo):
@@ -243,8 +244,9 @@ def cmd_inbox(args):
     conn = db()
     consumer = register(conn, args)
     shown = 0
+    login = store.get_state(conn, "login")
     for row in conn.execute("SELECT * FROM events ORDER BY created_at DESC"):
-        if not consumer.filters.matches(row):
+        if not consumer.filters.matches(row, login):
             continue
         c = claims.get(conn, row["id"])
         if c and c["done_at"] and not args.all:
@@ -421,6 +423,9 @@ def build_parser():
             for field in Filters.FIELDS:
                 p.add_argument(f"--{field}", action="append")
             p.add_argument("--all-events", action="store_true")
+            p.add_argument("--skip-late-echoes", action="store_true",
+                           help="ignore our own push/create/delete events that GitHub "
+                                "delivered over an hour late")
         if ids:
             p.add_argument("ids", nargs="+", metavar="ID")
         return p

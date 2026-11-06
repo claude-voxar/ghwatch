@@ -1,6 +1,7 @@
 import unittest
+from datetime import timedelta
 
-from ghwatch import consumers
+from ghwatch import consumers, store
 from ghwatch.consumers import Filters
 from tests.helpers import add, make_event, memdb
 
@@ -31,6 +32,37 @@ class FiltersTest(unittest.TestCase):
         self.assertEqual(Filters.from_json(f.to_json()), f)
         with self.assertRaises(ValueError):
             Filters(colour=["red"])
+
+
+def push(actor="me", late_by=7200, type="PushEvent"):
+    """An event fetched `late_by` seconds after GitHub says it happened."""
+    now = store.utcnow()
+    return make_event(type=type, actor=actor, actionable=0, source="repo",
+                      created_at=(now - timedelta(seconds=late_by)).strftime(store.TS_FORMAT),
+                      fetched_at=now.strftime(store.TS_FORMAT))
+
+
+class LateEchoTest(unittest.TestCase):
+    f = Filters(all_events=True, skip_late_echoes=True)
+
+    def test_own_late_branch_events_are_skipped(self):
+        for t in consumers.ECHO_TYPES:
+            self.assertFalse(self.f.matches(push(type=t), login="me"), t)
+        self.assertFalse(self.f.matches(push(actor="Me"), login="me"))  # logins are case-insensitive
+
+    def test_timely_or_foreign_or_other_types_still_match(self):
+        self.assertTrue(self.f.matches(push(late_by=60), login="me"))
+        self.assertTrue(self.f.matches(push(actor="alice"), login="me"))
+        # a late PR event by our login may be another session's PR: never hidden
+        self.assertTrue(self.f.matches(push(type="PullRequestEvent"), login="me"))
+
+    def test_off_by_default_and_without_login(self):
+        self.assertTrue(Filters(all_events=True).matches(push(), login="me"))
+        self.assertTrue(self.f.matches(push(), login=None))
+
+    def test_saved_with_filters(self):
+        self.assertEqual(Filters.from_json(self.f.to_json()), self.f)
+        self.assertTrue(Filters(skip_late_echoes=True))
 
 
 class ConsumerTest(unittest.TestCase):
@@ -80,6 +112,14 @@ class ConsumerTest(unittest.TestCase):
         replay.cursor = 0
         self.assertEqual([r["id"] for r in consumers.take_new(self.conn, replay, include_backfill=True)],
                          ["hist", "news"])
+
+    def test_take_new_uses_stored_login_for_late_echoes(self):
+        store.set_state(self.conn, "login", "me")
+        c = consumers.register(self.conn, "a", Filters(all_events=True, skip_late_echoes=True))
+        store.insert_event(self.conn, push())
+        fresh = push(late_by=5)
+        store.insert_event(self.conn, fresh)
+        self.assertEqual([r["id"] for r in consumers.take_new(self.conn, c)], [fresh["id"]])
 
     def test_forget(self):
         consumers.register(self.conn, "a", Filters(repo=["x/*"]))
