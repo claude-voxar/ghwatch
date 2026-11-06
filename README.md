@@ -22,13 +22,15 @@ Requirements: Python 3.9+ (stdlib only) and a logged-in `gh` CLI.
 
 Every session on this machine has the **`watch-repo`** skill (`skills/watch-repo`, linked into `~/.claude/skills` by `bin/deploy`). Asking a session to "watch org/app" is enough. The details below are what the skill follows.
 
-Start a Monitor that runs:
+Run the watch as a background command (Bash with `run_in_background`):
 
 ```bash
-~/ghwatch/bin/ghwatch watch -c <session-name> [filters] 2>&1
+~/ghwatch/bin/ghwatch watch -c <session-name> [filters] --until-event 2>&1
 ```
 
-Keep `2>&1`: without it, a crash would go to stderr and the Monitor would stay silent.
+It waits silently until something matches, prints that batch, and exits, and the exit is what wakes the session. After handling the batch, run the command again. The cursor is saved, so nothing is missed or repeated in between. A Monitor running `watch` without `--until-event` also works, but Monitors expire every 30 minutes and wake the session to re-arm even when nothing happened.
+
+Keep `2>&1`: without it, a crash would go to stderr and the session would never see it.
 
 Each new matching item arrives as one line:
 
@@ -43,12 +45,10 @@ When one arrives:
 3. Do the work.
 4. `ghwatch done <ID> -c <name>`. Add `--read` to also mark the GitHub notification read.
 
-Monitors expire, so re-arm with the same command. The cursor is saved, so nothing is missed or repeated.
-
 Two special lines can appear:
 
-- **`GHWATCH-UPGRADED ...`** means ghwatch was updated and the watch has exited. Re-arm it with the same command.
-- **`GHWATCH-STALE ...`** means no successful poll has completed for about 12 minutes. The maintainer session is notified automatically (see below), but you can run `ghwatch status` yourself.
+- **`GHWATCH-UPGRADED ...`** means ghwatch was updated and the watch has exited. Run the same command again.
+- **`GHWATCH-STALE ...`** means no successful poll has completed for about 12 minutes. It repeats at most every 30 minutes per consumer. The maintainer session is notified automatically (see below), but you can run `ghwatch status` yourself.
 
 `watch` starts a poller automatically if none is running. As long as any session is watching, polling continues.
 
@@ -81,7 +81,7 @@ An event can come from more than one feed but is stored once, so filter on `--re
 ## Commands
 
 ```
-ghwatch watch -c NAME [filters] [--backlog] [--interval S] [--no-poller]
+ghwatch watch -c NAME [filters] [--until-event] [--backlog] [--interval S] [--no-poller]
 ghwatch inbox -c NAME [filters] [--all] [--unclaimed] [--limit N]
 ghwatch claim ID... -c NAME
 ghwatch release ID... -c NAME
@@ -94,7 +94,7 @@ ghwatch ensure-poller | stop-poller | restart-poller
 ghwatch install-agent | uninstall-agent
 ghwatch forget-consumer NAME
 ghwatch track OWNER/NAME... -c NAME | untrack OWNER/NAME... | tracked
-ghwatch scan-transcripts [--follow] [--exclude-session ID] [--from-start]
+ghwatch scan-transcripts [--follow | --until-event] [--exclude-session ID] [--from-start]
 ```
 
 ## Storage
@@ -120,7 +120,7 @@ gh issue create -R claude-voxar/ghwatch -t "<summary>" -b "<what you ran, what h
 The maintainer also runs a scanner over other sessions' transcripts, which reports failing `ghwatch` commands and `GHWATCH-STALE` notices without anyone filing an issue:
 
 ```bash
-ghwatch scan-transcripts --follow --exclude-session <maintainer-session-id> 2>&1
+ghwatch scan-transcripts --until-event --exclude-session <maintainer-session-id> 2>&1
 ```
 
 ## Maintenance
