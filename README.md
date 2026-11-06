@@ -65,13 +65,14 @@ Repeat a flag to OR its values. Different flags are combined with AND. Glob patt
 | `--actor login` | who triggered an activity event |
 | `--match text` | substring of the title |
 | `--all-events` | include non-actionable activity; the default is actionable items only |
+| `--skip-late-echoes` | drop our own `PushEvent`/`CreateEvent`/`DeleteEvent` that GitHub delivered over an hour late (they are echoes the pushing session already handled) |
 
 Filters are saved per consumer the first time you use them. Passing filters again replaces the saved ones.
 
 **Tracking repos.** Notifications and the account's own feeds only cover repos the account is subscribed to or active in. A `--repo owner/name` filter with no wildcards makes the poller follow that repo's event feed directly. You can also do this explicitly with `ghwatch track owner/name -c NAME`. To see a tracked repo's pushes, PRs and issues, combine the filter with `--all-events`:
 
 ```bash
-ghwatch watch -c mobile --repo org/mobile-app --all-events 2>&1
+ghwatch watch -c mobile --repo org/mobile-app --all-events --skip-late-echoes 2>&1
 ```
 
 An event can come from more than one feed but is stored once, so filter on `--repo` rather than `--source`.
