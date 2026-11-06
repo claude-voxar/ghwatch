@@ -101,6 +101,17 @@ class EndToEndTest(unittest.TestCase):
         self.assertIn("(nothing open)", self.run_cli("inbox", "-c", "reviews"))
         self.assertIn("DONE by reviews", self.run_cli("inbox", "-c", "reviews", "--all"))
 
+    def test_skip_late_echoes_flag_is_saved_and_applied(self):
+        store.set_state(self.conn, "login", "me")
+        old = (store.utcnow() - timedelta(hours=3)).strftime(store.TS_FORMAT)
+        add(self.conn, type="PushEvent", actor="me", title="pushed to old-branch",
+            created_at=old, actionable=0)
+        add(self.conn, type="PushEvent", actor="me", title="pushed to fresh", actionable=0)
+        out = self.run_cli("inbox", "-c", "x", "--all-events", "--skip-late-echoes")
+        self.assertIn("pushed to fresh", out)
+        self.assertNotIn("old-branch", out)
+        self.assertTrue(consumers.register(self.conn, "x").filters.skip_late_echoes)
+
     def test_watch_streams_new_items(self):
         consumers.register(self.conn, "w", Filters(reason=["mention"]))
         add(self.conn, reason="mention", title="ping me")

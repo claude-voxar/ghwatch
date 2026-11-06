@@ -11,20 +11,38 @@ from ghwatch import store
 
 GLOB_FIELDS = ("repo", "type", "reason", "source", "actor")
 
+# GitHub's events API often delivers branch-level events hours late. When the
+# actor is our own login (every session here shares it), the session that did
+# the push already knows; the late copy is just a wake-up with nothing to do.
+ECHO_TYPES = ("PushEvent", "CreateEvent", "DeleteEvent")
+LATE_ECHO_AFTER = 3600  # seconds between created_at and fetched_at
+
+
+def is_late_echo(row, login):
+    if not login or row["type"] not in ECHO_TYPES:
+        return False
+    if (row["actor"] or "").lower() != login.lower():
+        return False
+    delay = store.parse_ts(row["fetched_at"]) - store.parse_ts(row["created_at"])
+    return delay.total_seconds() > LATE_ECHO_AFTER
+
 
 class Filters:
     """Values within a field are OR-ed; fields are AND-ed. Globs, case-insensitive.
 
     By default only actionable items match; `all_events` includes everything.
+    `skip_late_echoes` drops our own pushes/branch events that GitHub delivered
+    more than LATE_ECHO_AFTER late (needs the login passed to `matches`).
     """
 
     FIELDS = GLOB_FIELDS + ("match",)
 
-    def __init__(self, all_events=False, **fields):
+    def __init__(self, all_events=False, skip_late_echoes=False, **fields):
         unknown = set(fields) - set(self.FIELDS)
         if unknown:
             raise ValueError(f"unknown filter field(s): {', '.join(sorted(unknown))}")
         self.all_events = bool(all_events)
+        self.skip_late_echoes = bool(skip_late_echoes)
         self.fields = {k: [v.lower() for v in vals] for k, vals in fields.items() if vals}
 
     @classmethod
@@ -35,16 +53,20 @@ class Filters:
         d = dict(self.fields)
         if self.all_events:
             d["all_events"] = True
+        if self.skip_late_echoes:
+            d["skip_late_echoes"] = True
         return json.dumps(d, sort_keys=True)
 
     def __bool__(self):
-        return self.all_events or bool(self.fields)
+        return self.all_events or self.skip_late_echoes or bool(self.fields)
 
     def __eq__(self, other):
         return isinstance(other, Filters) and self.to_json() == other.to_json()
 
-    def matches(self, row):
+    def matches(self, row, login=None):
         if not self.all_events and not row["actionable"]:
+            return False
+        if self.skip_late_echoes and is_late_echo(row, login):
             return False
         for field in GLOB_FIELDS:
             pats = self.fields.get(field)
@@ -95,7 +117,9 @@ def take_new(conn, consumer, include_backfill=False):
         consumer.cursor = rows[-1]["seq"]
     conn.execute("UPDATE consumers SET cursor=?, last_seen=? WHERE name=?",
                  (consumer.cursor, store.now_iso(), consumer.name))
-    return [r for r in rows if (include_backfill or not r["backfill"]) and consumer.filters.matches(r)]
+    login = store.get_state(conn, "login")
+    return [r for r in rows
+            if (include_backfill or not r["backfill"]) and consumer.filters.matches(r, login)]
 
 
 def list_all(conn):
