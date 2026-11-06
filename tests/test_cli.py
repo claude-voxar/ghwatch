@@ -112,6 +112,19 @@ class EndToEndTest(unittest.TestCase):
         self.assertNotIn("old-branch", out)
         self.assertTrue(consumers.register(self.conn, "x").filters.skip_late_echoes)
 
+    def test_exclude_flag(self):
+        add(self.conn, type="PullRequestEvent", actor="bot", title="bot opened PR", actionable=0)
+        add(self.conn, type="PullRequestReviewEvent", actor="bot", title="bot approved", actionable=0)
+        out = self.run_cli("inbox", "-c", "x", "--all-events",
+                           "--exclude", "actor=bot,type=PullRequestReview*")
+        self.assertIn("bot opened PR", out)
+        self.assertNotIn("bot approved", out)
+        r = subprocess.run([sys.executable, os.path.join(ROOT, "bin", "ghwatch"), "inbox", "-c", "y",
+                            "--exclude", "who=bot"], capture_output=True, text=True, env=self.env)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("bad --exclude rule", r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
+
     def test_watch_streams_new_items(self):
         consumers.register(self.conn, "w", Filters(reason=["mention"]))
         add(self.conn, reason="mention", title="ping me")

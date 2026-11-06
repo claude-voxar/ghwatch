@@ -18,6 +18,23 @@ ECHO_TYPES = ("PushEvent", "CreateEvent", "DeleteEvent")
 LATE_ECHO_AFTER = 3600  # seconds between created_at and fetched_at
 
 
+def parse_exclude(text):
+    """'actor=bot,type=Issue*' -> {'actor': 'bot', 'type': 'issue*'} (one exclusion rule)."""
+    rule = {}
+    for part in text.split(","):
+        field, sep, pattern = part.partition("=")
+        field = field.strip().lower()
+        if not sep or field not in GLOB_FIELDS or not pattern.strip():
+            raise ValueError(f"bad --exclude rule {text!r}: use FIELD=GLOB[,FIELD=GLOB...] "
+                             f"with FIELD one of {', '.join(GLOB_FIELDS)}")
+        rule[field] = pattern.strip().lower()
+    return rule
+
+
+def _glob(row, field, pattern):
+    return fnmatch.fnmatchcase((row[field] or "").lower(), pattern)
+
+
 def is_late_echo(row, login):
     if not login or row["type"] not in ECHO_TYPES:
         return False
@@ -33,16 +50,23 @@ class Filters:
     By default only actionable items match; `all_events` includes everything.
     `skip_late_echoes` drops our own pushes/branch events that GitHub delivered
     more than LATE_ECHO_AFTER late (needs the login passed to `matches`).
+    `exclude` is a list of rules ({field: glob}); a row matching every field
+    of any rule is dropped, e.g. one actor's comments but not their PRs.
     """
 
     FIELDS = GLOB_FIELDS + ("match",)
 
-    def __init__(self, all_events=False, skip_late_echoes=False, **fields):
+    def __init__(self, all_events=False, skip_late_echoes=False, exclude=(), **fields):
         unknown = set(fields) - set(self.FIELDS)
         if unknown:
             raise ValueError(f"unknown filter field(s): {', '.join(sorted(unknown))}")
         self.all_events = bool(all_events)
         self.skip_late_echoes = bool(skip_late_echoes)
+        self.exclude = [parse_exclude(r) if isinstance(r, str) else
+                        {k: v.lower() for k, v in r.items()} for r in exclude]
+        for rule in self.exclude:
+            if not rule or set(rule) - set(GLOB_FIELDS):
+                raise ValueError(f"bad exclude rule {rule!r}")
         self.fields = {k: [v.lower() for v in vals] for k, vals in fields.items() if vals}
 
     @classmethod
@@ -55,10 +79,12 @@ class Filters:
             d["all_events"] = True
         if self.skip_late_echoes:
             d["skip_late_echoes"] = True
+        if self.exclude:
+            d["exclude"] = self.exclude
         return json.dumps(d, sort_keys=True)
 
     def __bool__(self):
-        return self.all_events or self.skip_late_echoes or bool(self.fields)
+        return self.all_events or self.skip_late_echoes or bool(self.exclude) or bool(self.fields)
 
     def __eq__(self, other):
         return isinstance(other, Filters) and self.to_json() == other.to_json()
@@ -70,11 +96,14 @@ class Filters:
             return False
         for field in GLOB_FIELDS:
             pats = self.fields.get(field)
-            if pats and not any(fnmatch.fnmatchcase((row[field] or "").lower(), p) for p in pats):
+            if pats and not any(_glob(row, field, p) for p in pats):
                 return False
         subs = self.fields.get("match")
         if subs and not any(s in (row["title"] or "").lower() for s in subs):
             return False
+        for rule in self.exclude:
+            if all(_glob(row, f, p) for f, p in rule.items()):
+                return False
         return True
 
 

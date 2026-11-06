@@ -63,8 +63,12 @@ def format_row(row, claim=None):
 
 def filters_from(args):
     fields = {k: getattr(args, k) for k in Filters.FIELDS if getattr(args, k, None)}
-    return Filters(all_events=args.all_events,
-                   skip_late_echoes=getattr(args, "skip_late_echoes", False), **fields)
+    try:
+        return Filters(all_events=args.all_events,
+                       skip_late_echoes=getattr(args, "skip_late_echoes", False),
+                       exclude=getattr(args, "exclude", None) or (), **fields)
+    except ValueError as e:
+        sys.exit(f"ghwatch: {e}")
 
 
 def verify_repo(repo):
@@ -426,6 +430,10 @@ def build_parser():
             p.add_argument("--skip-late-echoes", action="store_true",
                            help="ignore our own push/create/delete events that GitHub "
                                 "delivered over an hour late")
+            p.add_argument("--exclude", action="append", metavar="FIELD=GLOB[,FIELD=GLOB]",
+                           help="drop items matching every FIELD=GLOB in the rule; "
+                                "repeat for several rules, e.g. "
+                                "--exclude actor=bot,type='PullRequestReview*'")
         if ids:
             p.add_argument("ids", nargs="+", metavar="ID")
         return p
