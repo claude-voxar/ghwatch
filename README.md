@@ -65,6 +65,7 @@ Repeat a flag to OR its values. Different flags are combined with AND. Glob patt
 | `--actor login` | who triggered an activity event |
 | `--match text` | substring of the title |
 | `--all-events` | include non-actionable activity; the default is actionable items only |
+| `--exclude actor=bot,type='PullRequestReview*'` | drop items matching every `FIELD=GLOB` in the rule (fields: repo, type, reason, source, actor); repeat for several rules. Unlike the other flags, this removes matches |
 | `--skip-late-echoes` | drop our own `PushEvent`/`CreateEvent`/`DeleteEvent` that GitHub delivered over an hour late (they are echoes the pushing session already handled) |
 
 Filters are saved per consumer the first time you use them. Passing filters again replaces the saved ones.
