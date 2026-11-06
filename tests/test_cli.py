@@ -61,6 +61,18 @@ class StaleMessageTest(unittest.TestCase):
         self.assertIn("boom", msg)
 
 
+class StaleRateLimitTest(unittest.TestCase):
+    def test_warns_once_per_window_and_resets_on_recovery(self):
+        conn = memdb()
+        t = 1_000_000.0
+        self.assertTrue(cli.stale_warning_due(conn, "a", True, t))
+        self.assertFalse(cli.stale_warning_due(conn, "a", True, t + 60))       # re-armed watch
+        self.assertTrue(cli.stale_warning_due(conn, "b", True, t + 60))        # other consumer
+        self.assertTrue(cli.stale_warning_due(conn, "a", True, t + cli.STALE_REPEAT + 1))
+        self.assertFalse(cli.stale_warning_due(conn, "a", False, t + cli.STALE_REPEAT + 2))
+        self.assertTrue(cli.stale_warning_due(conn, "a", True, t + cli.STALE_REPEAT + 3))
+
+
 class EndToEndTest(unittest.TestCase):
     """Drive the real entry point against a temporary GHWATCH_HOME."""
 
@@ -104,6 +116,31 @@ class EndToEndTest(unittest.TestCase):
             proc.wait()
         self.assertIn("[mention]", line)
         self.assertIn("ping me", line)
+
+    def test_watch_until_event_blocks_then_exits_after_first_batch(self):
+        consumers.register(self.conn, "u", Filters(reason=["mention"]))
+        store.set_state(self.conn, "last_poll", store.now_iso())
+        proc = subprocess.Popen(
+            [sys.executable, os.path.join(ROOT, "bin", "ghwatch"), "watch", "-c", "u",
+             "--no-poller", "--interval", "0.1", "--until-event"],
+            stdout=subprocess.PIPE, text=True, env=self.env)
+        try:
+            with self.assertRaises(subprocess.TimeoutExpired):
+                proc.wait(timeout=1)  # nothing to report: keeps waiting, no output
+            with store.transaction(self.conn):  # one batch, whatever the loop timing
+                add(self.conn, reason="mention", title="first")
+                add(self.conn, reason="mention", title="second")
+            out, _ = proc.communicate(timeout=10)
+        finally:
+            proc.kill()
+        self.assertEqual(proc.returncode, 0)
+        self.assertIn("first", out)
+        self.assertIn("second", out)
+        # next run continues from the cursor: nothing is repeated
+        add(self.conn, reason="mention", title="third")
+        out = self.run_cli("watch", "-c", "u", "--no-poller", "--interval", "0.1", "--until-event")
+        self.assertNotIn("first", out)
+        self.assertIn("third", out)
 
     def test_watch_exits_when_code_changes(self):
         repo = os.path.join(self.tmp.name, "repo")
@@ -152,6 +189,9 @@ class EndToEndTest(unittest.TestCase):
         self.assertIn("poll for new", self.run_cli(*args))
         self.assertEqual(self.run_cli(*args), "")
         self.assertEqual(self.run_cli(*args, "--exclude-session", "abc"), "")
+        append("GHWATCH-STALE no successful poll for later")
+        out = self.run_cli(*args, "--until-event", "--interval", "0.1")  # returns once found
+        self.assertIn("poll for later", out)
 
     def test_show_and_status(self):
         ev = add(self.conn)["id"]
