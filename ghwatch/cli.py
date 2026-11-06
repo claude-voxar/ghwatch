@@ -4,7 +4,8 @@
   ensure-poller               start a detached poller if none is running
   stop-poller / restart-poller  stop, or stop and start again (e.g. after an upgrade)
   install-agent / uninstall-agent  run the poller under launchd (survives crashes/reboots)
-  watch -c NAME [filters]     Monitor stream: one stdout line per new matching item
+  watch -c NAME [filters]     one stdout line per new matching item; with --until-event,
+                              exit after the first batch (run in the background, re-run after)
   inbox -c NAME [filters]     list open matching items with claim status
   claim ID... -c NAME         take items; reports who has them if not you
   release ID... -c NAME       give claims back
@@ -39,6 +40,7 @@ from ghwatch.github import GitHub
 
 STALE_AFTER = 2 * poller.MAX_INTERVAL + 120  # seconds without a healthy poll
 STARTUP_GRACE = 180
+STALE_REPEAT = 1800  # seconds between repeated stale warnings to one consumer
 
 
 def home():
@@ -118,9 +120,27 @@ def stale_message(conn, now, watching_since):
             f"last_error={store.get_state(conn, 'last_error')}")
 
 
+def stale_warning_due(conn, consumer_name, stale, now):
+    """Rate-limit stale warnings per consumer.
+
+    With --until-event a session re-runs watch after every line it gets; without
+    this, an outage would wake it every few seconds instead of every STALE_REPEAT.
+    Recovery clears the mark, so the next outage is reported at once.
+    """
+    key = f"stale_warned:{consumer_name}"
+    if not stale:
+        conn.execute("DELETE FROM state WHERE key=?", (key,))
+        return False
+    last = store.get_state(conn, key)
+    if last is not None and now - float(last) < STALE_REPEAT:
+        return False
+    store.set_state(conn, key, str(now))
+    return True
+
+
 PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPGRADED_MSG = ("GHWATCH-UPGRADED ghwatch code changed on disk; this watch has exited. "
-                "Re-arm the Monitor with the same command to run the new version.")
+                "Run the same command again to use the new version.")
 
 
 def code_fingerprint(package_dir=PACKAGE_DIR):
@@ -140,7 +160,6 @@ def cmd_watch(args):
         consumer.cursor = 0
     started = time.time()
     fingerprint = code_fingerprint()
-    warned = False
     while True:
         if code_fingerprint() != fingerprint:
             # Long-running watchers would otherwise keep old code forever.
@@ -148,12 +167,15 @@ def cmd_watch(args):
             return
         if not args.no_poller and not poller.is_running(home()):
             poller.start_detached(home())
-        for line in watch_step(conn, consumer, include_backfill=args.backlog):
+        lines = watch_step(conn, consumer, include_backfill=args.backlog)
+        now = time.time()
+        msg = stale_message(conn, now, started)
+        if stale_warning_due(conn, consumer.name, msg is not None, now):
+            lines.append(msg)
+        for line in lines:
             print(line, flush=True)
-        msg = stale_message(conn, time.time(), started)
-        if msg and not warned:
-            print(msg, flush=True)
-        warned = bool(msg)
+        if lines and args.until_event:
+            return  # the caller handles these, then runs watch again
         time.sleep(args.interval)
 
 
@@ -343,10 +365,11 @@ def cmd_scan_transcripts(args):
         scanner.save()
     fingerprint = code_fingerprint()
     while True:
-        for problem in scanner.scan():
+        problems = scanner.scan()
+        for problem in problems:
             print(problem.line(), flush=True)
         scanner.save()
-        if not args.follow:
+        if not (args.follow or args.until_event) or (problems and args.until_event):
             return
         if code_fingerprint() != fingerprint:
             print(UPGRADED_MSG, flush=True)
@@ -415,6 +438,9 @@ def build_parser():
     p.add_argument("--interval", type=float, default=15, help="seconds between DB checks")
     p.add_argument("--backlog", action="store_true", help="replay all matching items first")
     p.add_argument("--no-poller", action="store_true", help="don't auto-start a poller")
+    p.add_argument("--until-event", action="store_true",
+                   help="exit after printing the first batch of lines; run it as a background "
+                        "command and start it again after handling them (no idle wake-ups)")
     p = add("inbox", cmd_inbox, consumer=True, filters=True)
     p.add_argument("--all", action="store_true", help="include done items")
     p.add_argument("--unclaimed", action="store_true", help="hide items claimed by others")
@@ -431,6 +457,8 @@ def build_parser():
     add("tracked", cmd_tracked)
     p = add("scan-transcripts", cmd_scan_transcripts)
     p.add_argument("--follow", action="store_true", help="keep scanning (for a Monitor)")
+    p.add_argument("--until-event", action="store_true",
+                   help="keep scanning until something is reported, print it and exit")
     p.add_argument("--interval", type=float, default=30)
     p.add_argument("--exclude-session", action="append", metavar="SESSION_ID",
                    help="ignore this session's transcript (e.g. the maintainer's own)")
