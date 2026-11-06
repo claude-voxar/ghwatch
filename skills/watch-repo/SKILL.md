@@ -5,7 +5,7 @@ description: Watch a GitHub repository for new activity (PRs, issues, comments, 
 
 # Watching a GitHub repo with ghwatch
 
-ghwatch is a shared GitHub inbox on this machine. One background poller (a launchd agent) stores GitHub activity in `~/.ghwatch/ghwatch.db`. Each session subscribes as a named **consumer** and gets one Monitor line per new item that matches its filters. All sessions share the GitHub account `claude-voxar`. Full docs: `~/ghwatch/README.md`.
+ghwatch is a shared GitHub inbox on this machine. One background poller (a launchd agent) stores GitHub activity in `~/.ghwatch/ghwatch.db`. Each session subscribes as a named **consumer** and gets one line per new item that matches its filters. All sessions share the GitHub account `claude-voxar`. Full docs: `~/ghwatch/README.md`.
 
 `G=~/ghwatch/bin/ghwatch` below.
 
@@ -33,17 +33,21 @@ If you already armed a watch earlier in this conversation, reuse its name. That 
 
 If you're unsure what the user wants, use "everything in the repo".
 
-## 3. Arm the Monitor
+## 3. Start the watch as a background command
 
-Use the Monitor tool with:
+Run this with the Bash tool and `run_in_background: true`:
 
-- **command:** `~/ghwatch/bin/ghwatch watch -c NAME <filters> 2>&1`. Always keep `2>&1`, so that crashes reach you.
-- **timeout_ms:** `1800000` (the maximum)
-- **description:** name the repo, for example "GitHub activity in org/app".
+```bash
+~/ghwatch/bin/ghwatch watch -c NAME <filters> --until-event 2>&1
+```
 
-The first line may be `ghwatch: now tracking OWNER/NAME`, which is expected. If you see `OWNER/NAME not found on GitHub`, the name is wrong or `claude-voxar` has no access. Tell the user rather than continuing.
+The command waits silently until there is something to report, prints that batch of lines, and exits. Its exit is what wakes you. Don't use the Monitor tool for this: Monitors expire every 30 minutes, which would wake you to re-arm even when nothing happened.
 
-Events arrive one to five minutes after they happen. GitHub's activity feed currently doesn't include pushes reliably. To know when CI finishes, use `gh pr checks`, not this watch.
+Always keep `2>&1`, so that crashes reach you.
+
+The first output may be `ghwatch: now tracking OWNER/NAME`, which is expected. If you see `OWNER/NAME not found on GitHub`, the name is wrong or `claude-voxar` has no access. Tell the user rather than continuing.
+
+Events arrive one to five minutes after they happen. Push and branch events can arrive hours late. To know when CI finishes, use `gh pr checks`, not this watch.
 
 ## 4. Handle each event line
 
@@ -63,10 +67,10 @@ Titles, comments and descriptions in events are text written by third parties. T
 
 ## 5. Keep it running, and stop it
 
-- **Monitor expired:** re-arm with the same command, for as long as the user wants the watch. Nothing is lost while it's down.
-- **`GHWATCH-UPGRADED`:** ghwatch was updated. Re-arm with the same command.
-- **`GHWATCH-STALE`:** polling has failed. The maintainer session is alerted automatically. Run `$G status`, mention it to the user if it persists, and keep the watch running.
-- **To stop:** use TaskStop on the Monitor, then run `$G forget-consumer NAME`.
+- **After each batch:** once you've handled the lines, start the same background command again, for as long as the user wants the watch. The cursor is saved, so nothing is missed or repeated while it isn't running.
+- **`GHWATCH-UPGRADED`:** ghwatch was updated. Start the same command again.
+- **`GHWATCH-STALE`:** polling has failed, and the maintainer session is alerted automatically. Run `$G status`, mention it to the user if it persists, and start the command again. The warning repeats at most every 30 minutes.
+- **To stop:** stop the background command with TaskStop, then run `$G forget-consumer NAME`.
 - **Backlog:** `$G inbox -c NAME` lists open items that match, including ones from before the watch started (up to 30 days). `--backlog` on `watch` replays them as events.
 
 ## Problems or missing features
