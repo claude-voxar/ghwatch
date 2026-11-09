@@ -22,12 +22,29 @@ MAX_REPORTED = 5000
 # Exact text watch emits; docs mention the marker but never this phrase.
 STALE = "GHWATCH-STALE no successful poll"
 
-# Output of a ghwatch command that indicates something went wrong.
-FAILURE = re.compile(
+# Output that can only come from ghwatch going wrong.
+GHWATCH_FAILURE = (
     r"Traceback \(most recent call last\)|" + STALE + r"|^\S*ghwatch[^:\n]*: error:|"
-    r"\b\w*Error\b|No such file|Permission denied|database is locked|command not found|"
-    r"not an owner/name|unknown filter|did not stop|could not |Exit code [1-9]",
-    re.MULTILINE)
+    r"\S*ghwatch[^:\n]*: (?:command not found|No such file)|"
+    r"database is locked|not an owner/name|unknown filter|bad --exclude rule|"
+    r"not found on GitHub|no such event:|did not stop|did not take over|could not mark")
+# Generic failure signs. In a chained command (`ghwatch done X; grep ...`)
+# these may come from the other commands, so they only count when ghwatch
+# ran on its own.
+GENERIC_FAILURE = (
+    r"^[\w.]*(?:Error|Exception):|No such file|Permission denied|command not found|"
+    r"could not |Exit code [1-9]")
+FAILURE = re.compile(GHWATCH_FAILURE + "|" + GENERIC_FAILURE, re.MULTILINE)
+CHAINED_FAILURE = re.compile(GHWATCH_FAILURE, re.MULTILINE)
+# Redirections that don't chain commands; anything else with ; & | or a
+# newline runs more than one command.
+_REDIRECT = re.compile(r"\d*>&\d|&>\s*\S+|\d*>>?\s*/dev/null")
+
+
+def is_chained(command):
+    return bool(re.search(r"[;&|\n]", _REDIRECT.sub(" ", command.strip())))
+
+
 # Text arriving in a session outside a tool result (e.g. Monitor events).
 NOTICE = re.compile(STALE + r"[^\n\"<]*")
 
@@ -70,9 +87,13 @@ def _text(content):
     return "" if content is None else str(content)
 
 
-def failure_detail(output, is_error):
-    """The first line explaining a failure, or None if the output looks fine."""
-    m = FAILURE.search(output)
+def failure_detail(output, is_error, chained=False):
+    """The first line explaining a failure, or None if the output looks fine.
+
+    For a chained command only ghwatch-specific signs count, and a non-zero
+    exit alone doesn't: it may belong to another command in the chain.
+    """
+    m = (CHAINED_FAILURE if chained else FAILURE).search(output)
     if m:
         start = output.rfind("\n", 0, m.start()) + 1
         end = output.find("\n", m.end())
@@ -82,7 +103,7 @@ def failure_detail(output, is_error):
             tail = [ln for ln in output[m.start():].splitlines() if ln.strip()]
             line = tail[-1].strip() if tail else line
         return line
-    if is_error:
+    if is_error and not chained:
         return (output.strip().splitlines() or ["tool reported an error"])[0]
     return None
 
@@ -192,7 +213,8 @@ class Scanner:
         command = self.state["pending"].pop(item.get("tool_use_id"), None)
         if command is None:
             return []
-        detail = failure_detail(_text(item.get("content")), bool(item.get("is_error")))
+        detail = failure_detail(_text(item.get("content")), bool(item.get("is_error")),
+                                chained=is_chained(command))
         if detail is None:
             return []
         return self._report(f"{meta[0]}:{item.get('tool_use_id')}", Problem(*meta, command, detail, where))
