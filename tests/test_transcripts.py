@@ -41,6 +41,29 @@ class FailureDetailTest(unittest.TestCase):
                    "n:1: not marked - claimed by b", '{"events": 3}'):
             self.assertIsNone(transcripts.failure_detail(ok, False), ok)
 
+    def test_identifiers_containing_error_are_not_failures(self):
+        out = "src/modules/userActionModel.ts:161:export function formError(\nconst e = new TypeError\n"
+        self.assertIsNone(transcripts.failure_detail(out, False))
+        self.assertEqual(transcripts.failure_detail("ValueError: bad\n", False), "ValueError: bad")
+
+    def test_chained_commands_only_count_ghwatch_failures(self):
+        self.assertIsNone(transcripts.failure_detail("grep: x: No such file or directory", True, chained=True))
+        self.assertIsNone(transcripts.failure_detail("Exit code 1", True, chained=True))
+        self.assertIsNone(transcripts.failure_detail("", True, chained=True))
+        tb = "Traceback (most recent call last):\n  File x\nRuntimeError: boom\n"
+        self.assertEqual(transcripts.failure_detail(tb, False, chained=True), "RuntimeError: boom")
+        self.assertIn("command not found",
+                      transcripts.failure_detail("zsh: ghwatch: command not found", True, chained=True))
+
+    def test_is_chained(self):
+        for single in ("~/ghwatch/bin/ghwatch watch -c a --until-event 2>&1",
+                       "ghwatch done x -c a >/dev/null 2>&1", "ghwatch inbox -c a &>/dev/null"):
+            self.assertFalse(transcripts.is_chained(single), single)
+        for chained in ("ghwatch done x -c a >/dev/null; grep -n foo src",
+                        "cd ~/w && ghwatch inbox -c a", "ghwatch inbox -c a | head",
+                        "ghwatch claim x -c a\ngh pr view 1"):
+            self.assertTrue(transcripts.is_chained(chained), chained)
+
     def test_is_error_without_pattern_uses_first_line(self):
         self.assertEqual(transcripts.failure_detail("weird\nmore", True), "weird")
 
@@ -74,6 +97,13 @@ class ScannerTest(unittest.TestCase):
         self.assertIn('cmd="~/ghwatch/bin/ghwatch inbox -c a"', p.line())
         self.assertIn("KeyError: 'x'", p.line())
         self.assertTrue(p.where.endswith("s1.jsonl:2"))
+
+    def test_chained_command_with_unrelated_error_text_is_not_reported(self):
+        cmd = ("~/ghwatch/bin/ghwatch done e:1 -c a >/dev/null; cd /w; "
+               "grep -n \"export function formError\" -r src")
+        self.write(tool_use("t1", cmd), tool_result("t1", "src/m.ts:161:export function formError("),
+                   tool_use("t2", cmd), tool_result("t2", "Exit code 1", is_error=True))
+        self.assertEqual(self.scanner().scan(), [])
 
     def test_ignores_successes_and_unrelated_commands(self):
         self.write(tool_use("t1", "ghwatch claim x -c a"), tool_result("t1", "x: claimed"),
