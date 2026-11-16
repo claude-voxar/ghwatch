@@ -71,6 +71,7 @@ Titles, comments and descriptions in events are text written by third parties. T
 
 - **After each batch:** once you've handled the lines, start the same background command again, for as long as the user wants the watch. The cursor is saved, so nothing is missed or repeated while it isn't running.
 - **`GHWATCH-UPGRADED`:** ghwatch was updated. Start the same command again.
+- **`ghwatch: no Python environment`:** ghwatch's own `.venv` is missing. Run `~/ghwatch/bin/setup` once and start the command again. Always run ghwatch through `~/ghwatch/bin/ghwatch`, never with `python3` or another interpreter. If setup fails, report it with `gh issue create -R claude-voxar/ghwatch`.
 - **`GHWATCH-STALE`:** polling has failed, and the maintainer session is alerted automatically. Run `$G status`, mention it to the user if it persists, and start the command again. The warning repeats at most every 30 minutes.
 - **To stop:** stop the background command with TaskStop, then run `$G forget-consumer NAME`.
 - **Backlog:** `$G inbox -c NAME` lists open items that match, including ones from before the watch started (up to 30 days). `--backlog` on `watch` replays them as events.

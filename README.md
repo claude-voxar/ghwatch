@@ -16,7 +16,15 @@ GitHub API ──► poller (one per machine, flock) ──► ~/.ghwatch/ghwatc
               --reason review_requested      --repo 'org/mobile*'      --all-events
 ```
 
-Requirements: Python 3.9+ (stdlib only) and a logged-in `gh` CLI.
+Requirements: a logged-in `gh` CLI and the Python version pinned in `.tool-versions` (install it with `asdf install`). The code is stdlib only and supports Python 3.9+, which CI tests.
+
+### Setup
+
+```bash
+~/ghwatch/bin/setup
+```
+
+`bin/setup` builds `.venv` from the pinned Python and rebuilds it when the pin changes; `bin/deploy` runs it on every deploy. `bin/ghwatch` and the launchd agent always run `.venv/bin/python`, never `python3` from `PATH`. That way ghwatch works from any directory, including projects whose asdf pins another Python or none, and never falls back to the system interpreter. If the venv is missing, `bin/ghwatch` exits with `ghwatch: no Python environment ...; run .../bin/setup`.
 
 ## Using it from a Claude session
 
@@ -139,7 +147,7 @@ ghwatch uninstall-agent
 
 `ghwatch install-agent` installs `~/Library/LaunchAgents/com.github.claude-voxar.ghwatch.poller.plist`, which runs `ghwatch poll --wait-lock` with `KeepAlive`. Polling then continues through crashes and reboots, and while no session is watching. A poller that a watcher starts while the agent is running waits on the lock rather than competing.
 
-With the agent installed, `restart-poller` (and so `bin/deploy`) restarts the agent onto the new code and retires any other poller. Run `install-agent` from the production checkout, because the plist points at the checkout it was run from.
+With the agent installed, `restart-poller` (and so `bin/deploy`) restarts the agent onto the new code and retires any other poller. If the installed plist differs from what the current code would write (for example, it still names an old interpreter), `restart-poller` rewrites and reloads it first. Run `install-agent` from the production checkout, because the plist points at the checkout it was run from.
 
 `~/ghwatch` is the production checkout and always stays on `main`. Do development in a separate worktree, such as `git worktree add ~/ghwatch-dev <branch>`. Editing or switching branches in the production checkout would change the code under every running watcher.
 
