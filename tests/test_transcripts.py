@@ -57,6 +57,30 @@ class FailureDetailTest(unittest.TestCase):
         missing = "ghwatch: no Python environment at /r/.venv; run /r/bin/setup"
         self.assertEqual(transcripts.failure_detail(missing, True, chained=True), missing)
 
+    def test_ghwatch_messages_are_recognised(self):
+        for line in ("ghwatch: no Python environment at /r/.venv; run /r/bin/setup",
+                     "ghwatch: bad --exclude rule 'x': use FIELD=GLOB",
+                     "ghwatch: acme/typo not found on GitHub; not tracking it",
+                     "acme: not an owner/name repository: 'acme'",
+                     "no such event: e:1", "  could not mark GitHub thread read: boom",
+                     "poller: did not stop within timeout",
+                     "poller: launchd agent did not take over the lock within timeout",
+                     "sqlite3.OperationalError: database is locked",
+                     "zsh: ghwatch: command not found",
+                     "GHWATCH-STALE no successful poll for 900s; last_error=None"):
+            self.assertEqual(transcripts.failure_detail("ok\n" + line, False, chained=True), line.strip())
+
+    def test_showing_ghwatch_source_is_not_a_failure(self):
+        # e.g. `head bin/ghwatch; ghwatch consumers`: the source contains every
+        # message ghwatch can print, but not at the start of a line.
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        paths = [os.path.join(root, "bin", n) for n in os.listdir(os.path.join(root, "bin"))]
+        paths += [os.path.join(root, "ghwatch", n) for n in os.listdir(os.path.join(root, "ghwatch"))
+                  if n.endswith(".py")]
+        for path in paths:
+            with open(path) as fh:
+                self.assertIsNone(transcripts.failure_detail(fh.read(), False, chained=True), path)
+
     def test_is_chained(self):
         for single in ("~/ghwatch/bin/ghwatch watch -c a --until-event 2>&1",
                        "ghwatch done x -c a >/dev/null 2>&1", "ghwatch inbox -c a &>/dev/null"):
@@ -124,7 +148,7 @@ class ScannerTest(unittest.TestCase):
         cmds = ["~/ghwatch/bin/ghwatch inbox -c a", "cd x && ghwatch claim e:1 -c a",
                 "GHWATCH_HOME=/t python3 -m ghwatch poll --once", "~/ghwatch/bin/deploy"]
         for i, cmd in enumerate(cmds):
-            self.write(tool_use(f"v{i}", cmd), tool_result(f"v{i}", "database is locked", True))
+            self.write(tool_use(f"v{i}", cmd), tool_result(f"v{i}", "sqlite3.OperationalError: database is locked", True))
         self.assertEqual(len(self.scanner().scan()), len(cmds))
 
     def test_monitor_stale_notice(self):
