@@ -1,10 +1,11 @@
-#!/usr/bin/env python3
-"""Entry point that works without installing the package."""
-import os
-import sys
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
-
-from ghwatch.cli import main  # noqa: E402
-
-main()
+#!/bin/sh
+# Run ghwatch with its own interpreter (.venv, built by bin/setup from the
+# Python pinned in .tool-versions), whatever directory, PATH or asdf
+# setting it is called from.
+root=$(cd "$(dirname "$0")/.." && pwd -P)
+py="$root/.venv/bin/python"
+if [ ! -x "$py" ]; then
+  echo "ghwatch: no Python environment at $root/.venv; run $root/bin/setup" >&2
+  exit 1
+fi
+PYTHONPATH="$root${PYTHONPATH:+:$PYTHONPATH}" exec "$py" -m ghwatch "$@"

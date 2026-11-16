@@ -2,6 +2,7 @@ import os
 import plistlib
 import signal
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -27,12 +28,18 @@ class FakeLaunchctl:
 class PlistTest(unittest.TestCase):
     def test_contents(self):
         p = launchd.build_plist("/h", python="/py", pkg_root="/repo", gh_path="/opt/homebrew/bin/gh")
-        self.assertEqual(p["ProgramArguments"], ["/py", "/repo/bin/ghwatch", "poll", "--wait-lock"])
+        self.assertEqual(p["ProgramArguments"], ["/py", "-m", "ghwatch", "poll", "--wait-lock"])
+        self.assertEqual(p["EnvironmentVariables"]["PYTHONPATH"], "/repo")
+        self.assertEqual(p["WorkingDirectory"], "/repo")
         self.assertTrue(p["KeepAlive"])
         self.assertTrue(p["RunAtLoad"])
         self.assertEqual(p["EnvironmentVariables"]["GHWATCH_HOME"], "/h")
         self.assertTrue(p["EnvironmentVariables"]["PATH"].startswith("/opt/homebrew/bin:"))
         self.assertEqual(p["StandardErrorPath"], "/h/poller.log")
+
+    def test_defaults_to_the_repos_own_venv(self):
+        p = launchd.build_plist("/h", pkg_root="/repo", gh_path="/x/gh")
+        self.assertEqual(p["ProgramArguments"][0], "/repo/.venv/bin/python")
 
 
 class InstallTest(unittest.TestCase):
@@ -40,6 +47,9 @@ class InstallTest(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.agents = os.path.join(self.tmp.name, "LaunchAgents")
         self.home = os.path.join(self.tmp.name, "home")
+        venv = mock.patch.object(launchd, "venv_python", return_value=sys.executable)
+        venv.start()
+        self.addCleanup(venv.stop)
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -52,6 +62,23 @@ class InstallTest(unittest.TestCase):
         self.assertEqual([c[0] for c in run.calls], ["bootout", "bootstrap"])
         self.assertEqual(run.calls[1][2], path)
         self.assertTrue(launchd.is_installed(self.agents))
+
+    def test_is_current_only_for_identical_plist(self):
+        self.assertFalse(launchd.is_current(self.home, self.agents))
+        launchd.install(self.home, self.agents, run=FakeLaunchctl())
+        self.assertTrue(launchd.is_current(self.home, self.agents))
+        with open(launchd.plist_path(self.agents), "rb") as fh:
+            old = plistlib.load(fh)
+        old["ProgramArguments"][0] = "/Library/Developer/CommandLineTools/usr/bin/python3"
+        with open(launchd.plist_path(self.agents), "wb") as fh:
+            plistlib.dump(old, fh)
+        self.assertFalse(launchd.is_current(self.home, self.agents))
+
+    def test_install_refuses_without_venv(self):
+        with mock.patch.object(launchd, "venv_python", return_value="/nonexistent/python"):
+            with self.assertRaisesRegex(RuntimeError, "bin/setup"):
+                launchd.install(self.home, self.agents, run=FakeLaunchctl())
+        self.assertFalse(launchd.is_installed(self.agents))
 
     def test_install_reports_bootstrap_failure(self):
         with self.assertRaises(RuntimeError):

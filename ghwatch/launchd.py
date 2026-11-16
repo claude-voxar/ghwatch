@@ -11,7 +11,6 @@ import re
 import shutil
 import signal
 import subprocess
-import sys
 import time
 
 from ghwatch import poller
@@ -29,7 +28,13 @@ def service():
     return f"gui/{os.getuid()}/{LABEL}"
 
 
-def build_plist(home, python=sys.executable, pkg_root=PKG_ROOT, gh_path=None):
+def venv_python(pkg_root=PKG_ROOT):
+    """ghwatch's own interpreter, built by bin/setup from .tool-versions."""
+    return os.path.join(pkg_root, ".venv", "bin", "python")
+
+
+def build_plist(home, python=None, pkg_root=PKG_ROOT, gh_path=None):
+    python = python or venv_python(pkg_root)
     gh_path = gh_path or shutil.which("gh")
     path_dirs = ["/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"]
     if gh_path:
@@ -38,8 +43,9 @@ def build_plist(home, python=sys.executable, pkg_root=PKG_ROOT, gh_path=None):
     log = os.path.join(home, "poller.log")
     return {
         "Label": LABEL,
-        "ProgramArguments": [python, os.path.join(pkg_root, "bin", "ghwatch"), "poll", "--wait-lock"],
-        "EnvironmentVariables": {"GHWATCH_HOME": home, "PATH": ":".join(dict.fromkeys(path_dirs))},
+        "ProgramArguments": [python, "-m", "ghwatch", "poll", "--wait-lock"],
+        "EnvironmentVariables": {"GHWATCH_HOME": home, "PYTHONPATH": pkg_root,
+                                 "PATH": ":".join(dict.fromkeys(path_dirs))},
         "WorkingDirectory": pkg_root,
         "RunAtLoad": True,
         "KeepAlive": True,
@@ -57,8 +63,20 @@ def is_installed(agents_dir=None):
     return os.path.exists(plist_path(agents_dir))
 
 
+def is_current(home, agents_dir=None):
+    """Whether the installed plist is what this code would write now."""
+    try:
+        with open(plist_path(agents_dir), "rb") as fh:
+            return plistlib.load(fh) == build_plist(home)
+    except (OSError, plistlib.InvalidFileException):
+        return False
+
+
 def install(home, agents_dir=None, run=subprocess.run):
     """Write the plist and (re)load it. Returns the plist path."""
+    python = build_plist(home)["ProgramArguments"][0]
+    if not os.access(python, os.X_OK):
+        raise RuntimeError(f"{python} not found; run {os.path.join(PKG_ROOT, 'bin', 'setup')} first")
     path = plist_path(agents_dir)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     os.makedirs(home, exist_ok=True)

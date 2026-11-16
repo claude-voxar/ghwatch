@@ -219,6 +219,9 @@ def cmd_stop_poller(args):
 
 def cmd_restart_poller(args):
     if launchd.is_installed():
+        if not launchd.is_current(home()):
+            # e.g. the interpreter it runs changed; reload it with the new plist
+            print(f"launchd agent: updating {launchd.install(home())}")
         if not launchd.restart(home()):
             sys.exit("poller: launchd agent did not take over the lock within timeout")
         print(f"poller: restarted via launchd agent (pid {launchd.agent_pid()})")

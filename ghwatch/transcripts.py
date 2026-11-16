@@ -25,7 +25,7 @@ STALE = "GHWATCH-STALE no successful poll"
 # Output that can only come from ghwatch going wrong.
 GHWATCH_FAILURE = (
     r"Traceback \(most recent call last\)|" + STALE + r"|^\S*ghwatch[^:\n]*: error:|"
-    r"\S*ghwatch[^:\n]*: (?:command not found|No such file)|"
+    r"\S*ghwatch[^:\n]*: (?:command not found|No such file)|ghwatch: no Python environment|"
     r"database is locked|not an owner/name|unknown filter|bad --exclude rule|"
     r"not found on GitHub|no such event:|did not stop|did not take over|could not mark")
 # Generic failure signs. In a chained command (`ghwatch done X; grep ...`)

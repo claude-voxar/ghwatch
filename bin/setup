@@ -1,0 +1,33 @@
+#!/bin/sh
+# Build ghwatch's own environment: .venv from the Python pinned in
+# .tool-versions. bin/ghwatch and the launchd agent run only this
+# interpreter, so ghwatch works from any directory and never depends on
+# another project's toolchain or the system Python. Stdlib only: nothing
+# is installed into the venv.
+#
+#   bin/setup          create .venv, or rebuild it if the pin changed
+#
+# GHWATCH_BASE_PYTHON overrides the interpreter the venv is built from
+# (default: python3 as resolved in this directory, i.e. asdf's pin); it
+# must still be the pinned version.
+set -eu
+cd "$(dirname "$0")/.."
+
+want=$(awk '$1 == "python" { print $2 }' .tool-versions)
+if [ -z "$want" ]; then
+  echo "setup: no python version in .tool-versions" >&2; exit 1
+fi
+version() { "$1" -c 'import platform; print(platform.python_version())' 2>/dev/null || true; }
+
+if [ "$(version .venv/bin/python)" = "$want" ]; then
+  echo "setup: .venv already on Python $want"; exit 0
+fi
+base=${GHWATCH_BASE_PYTHON:-python3}
+have=$(version "$base")
+if [ "$have" != "$want" ]; then
+  echo "setup: need Python $want from .tool-versions, but $base is '${have:-missing}'." >&2
+  echo "setup: install it with: asdf install python $want" >&2
+  exit 1
+fi
+"$base" -m venv --clear --without-pip .venv
+echo "setup: built .venv on Python $want"
