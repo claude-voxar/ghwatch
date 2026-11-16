@@ -3,8 +3,9 @@
 #
 #   bin/deploy [--force]
 #
-# Fast-forwards, runs the test suite on this host and, if it fails, rolls
-# back to the previous commit. On success links skills/* into
+# Fast-forwards, (re)builds ghwatch's own .venv (bin/setup), runs the test
+# suite with it on this host and, if either fails, rolls back to the
+# previous commit. On success links skills/* into
 # ~/.claude/skills and restarts the poller (if one is running) so it loads
 # the new code; running watchers notice the change
 # themselves and exit with GHWATCH-UPGRADED.
@@ -39,7 +40,13 @@ else
 fi
 
 log=$(mktemp)
-if ! ${GHWATCH_DEPLOY_TEST_CMD:-make -s test} >"$log" 2>&1; then
+if ! ${GHWATCH_DEPLOY_SETUP_CMD:-bin/setup} >"$log" 2>&1; then
+  echo "deploy: bin/setup FAILED on ${after:0:7}; rolling back to ${before:0:7}" >&2
+  cat "$log" >&2
+  git reset -q --hard "$before"
+  exit 1
+fi
+if ! ${GHWATCH_DEPLOY_TEST_CMD:-make -s test PY=.venv/bin/python} >"$log" 2>&1; then
   echo "deploy: tests FAILED on ${after:0:7}; rolling back to ${before:0:7}" >&2
   tail -20 "$log" >&2
   git reset -q --hard "$before"

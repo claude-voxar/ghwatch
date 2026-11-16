@@ -54,6 +54,8 @@ class FailureDetailTest(unittest.TestCase):
         self.assertEqual(transcripts.failure_detail(tb, False, chained=True), "RuntimeError: boom")
         self.assertIn("command not found",
                       transcripts.failure_detail("zsh: ghwatch: command not found", True, chained=True))
+        missing = "ghwatch: no Python environment at /r/.venv; run /r/bin/setup"
+        self.assertEqual(transcripts.failure_detail(missing, True, chained=True), missing)
 
     def test_is_chained(self):
         for single in ("~/ghwatch/bin/ghwatch watch -c a --until-event 2>&1",

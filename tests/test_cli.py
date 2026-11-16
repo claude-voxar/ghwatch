@@ -15,6 +15,13 @@ from tests.helpers import add, memdb
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
+def ghwatch(root=ROOT):
+    """argv prefix running the CLI from `root` with this interpreter (bin/ghwatch
+    would need root/.venv, which only bin/setup creates)."""
+    return [sys.executable, "-c", "import sys; sys.path.insert(0, sys.argv.pop(1)); "
+            "from ghwatch.cli import main; main()", root]
+
+
 class WatchStepTest(unittest.TestCase):
     def setUp(self):
         self.conn = memdb()
@@ -85,7 +92,7 @@ class EndToEndTest(unittest.TestCase):
         self.tmp.cleanup()
 
     def run_cli(self, *args):
-        r = subprocess.run([sys.executable, os.path.join(ROOT, "bin", "ghwatch"), *args],
+        r = subprocess.run([*ghwatch(), *args],
                            capture_output=True, text=True, env=self.env, timeout=30)
         self.assertEqual(r.returncode, 0, r.stderr)
         return r.stdout
@@ -119,7 +126,7 @@ class EndToEndTest(unittest.TestCase):
                            "--exclude", "actor=bot,type=PullRequestReview*")
         self.assertIn("bot opened PR", out)
         self.assertNotIn("bot approved", out)
-        r = subprocess.run([sys.executable, os.path.join(ROOT, "bin", "ghwatch"), "inbox", "-c", "y",
+        r = subprocess.run([*ghwatch(), "inbox", "-c", "y",
                             "--exclude", "who=bot"], capture_output=True, text=True, env=self.env)
         self.assertEqual(r.returncode, 1)
         self.assertIn("bad --exclude rule", r.stderr)
@@ -130,7 +137,7 @@ class EndToEndTest(unittest.TestCase):
         add(self.conn, reason="mention", title="ping me")
         add(self.conn, reason="assign")
         proc = subprocess.Popen(
-            [sys.executable, os.path.join(ROOT, "bin", "ghwatch"), "watch", "-c", "w",
+            [*ghwatch(), "watch", "-c", "w",
              "--no-poller", "--interval", "0.2"],
             stdout=subprocess.PIPE, text=True, env=self.env)
         try:
@@ -145,7 +152,7 @@ class EndToEndTest(unittest.TestCase):
         consumers.register(self.conn, "u", Filters(reason=["mention"]))
         store.set_state(self.conn, "last_poll", store.now_iso())
         proc = subprocess.Popen(
-            [sys.executable, os.path.join(ROOT, "bin", "ghwatch"), "watch", "-c", "u",
+            [*ghwatch(), "watch", "-c", "u",
              "--no-poller", "--interval", "0.1", "--until-event"],
             stdout=subprocess.PIPE, text=True, env=self.env)
         try:
@@ -170,7 +177,7 @@ class EndToEndTest(unittest.TestCase):
         repo = os.path.join(self.tmp.name, "repo")
         shutil.copytree(ROOT, repo, ignore=shutil.ignore_patterns(".git", "__pycache__"))
         proc = subprocess.Popen(
-            [sys.executable, os.path.join(repo, "bin", "ghwatch"), "watch", "-c", "u",
+            [*ghwatch(repo), "watch", "-c", "u",
              "--no-poller", "--interval", "0.1"],
             stdout=subprocess.PIPE, text=True, env=self.env)
         try:

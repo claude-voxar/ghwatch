@@ -29,6 +29,7 @@ class DeployTest(unittest.TestCase):
         git(t, "clone", "-q", self.origin, self.prod)
         self.skills = os.path.join(t, "claude-skills")
         self.env = dict(os.environ, GHWATCH_HOME=os.path.join(t, "home"), CLAUDE_SKILLS_DIR=self.skills,
+                        GHWATCH_DEPLOY_SETUP_CMD="true",
                         GHWATCH_DEPLOY_TEST_CMD="python3 -m compileall -q ghwatch")
 
     def tearDown(self):
@@ -92,6 +93,15 @@ class DeployTest(unittest.TestCase):
         r = self.deploy()
         self.assertEqual(r.returncode, 1)
         self.assertIn("rolling back", r.stderr)
+        self.assertEqual(git(self.prod, "rev-parse", "HEAD"), before)
+
+    def test_failing_setup_rolls_back(self):
+        before = git(self.prod, "rev-parse", "HEAD")
+        self.push_change("\n# ok\n")
+        self.env["GHWATCH_DEPLOY_SETUP_CMD"] = "false"
+        r = self.deploy()
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("bin/setup FAILED", r.stderr)
         self.assertEqual(git(self.prod, "rev-parse", "HEAD"), before)
 
     def test_refuses_dirty_or_non_main(self):
