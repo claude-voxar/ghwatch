@@ -16,7 +16,7 @@ GitHub API ──► poller (one per machine, flock) ──► ~/.ghwatch/ghwatc
               --reason review_requested      --repo 'org/mobile*'      --all-events
 ```
 
-Requirements: a logged-in `gh` CLI and the Python version pinned in `.tool-versions` (install it with `asdf install`). The code is stdlib only and supports Python 3.9+, which CI tests.
+Requirements: a logged-in `gh` CLI and the Python version pinned in `.tool-versions` (install it with `asdf install`). The code is stdlib only, and CI tests it on the pinned version.
 
 ### Setup
 

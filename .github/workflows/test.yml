@@ -13,11 +13,11 @@ jobs:
         # macOS runners are 10x minutes on private repos and queue for long
         # stretches; the deploy step runs `make test` on the macOS host instead.
         os: [ubuntu-latest]
-        python: ["3.9", "3.13"]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      # The one interpreter ghwatch runs on (bin/setup builds .venv from it).
       - uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python }}
+          python-version-file: .tool-versions
       - run: make test
