@@ -28,7 +28,8 @@ class DeployTest(unittest.TestCase):
         git(self.work, "remote", "add", "origin", self.origin)
         git(t, "clone", "-q", self.origin, self.prod)
         self.skills = os.path.join(t, "claude-skills")
-        self.env = dict(os.environ, GHWATCH_HOME=os.path.join(t, "home"), CLAUDE_SKILLS_DIR=self.skills,
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GHWATCH_DEPLOY_")}
+        self.env = dict(env, GHWATCH_HOME=os.path.join(t, "home"), CLAUDE_SKILLS_DIR=self.skills,
                         GHWATCH_DEPLOY_SETUP_CMD="true",
                         GHWATCH_DEPLOY_TEST_CMD="python3 -m compileall -q ghwatch")
 
@@ -82,8 +83,14 @@ class DeployTest(unittest.TestCase):
         git(self.work, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qam", "new step")
         git(self.work, "push", "-q", "origin", "main")
         before = git(self.prod, "rev-parse", "--short=7", "HEAD").strip()
+        # The suite (which runs these deploy tests) must not see the hand-over variable.
+        check = os.path.join(self.tmp.name, "check-env")
+        with open(check, "w") as fh:
+            fh.write('#!/bin/sh\n[ -z "${GHWATCH_DEPLOY_BEFORE:-}" ] || { echo "leaked"; exit 1; }\n')
+        os.chmod(check, 0o755)
+        self.env["GHWATCH_DEPLOY_TEST_CMD"] = check
         r = self.deploy()
-        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("continuing with the new version", r.stdout)
         self.assertIn(f"NEW STEP RAN from={before}", r.stdout)
 
