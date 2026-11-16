@@ -4,13 +4,22 @@ import sys
 import tempfile
 import textwrap
 import unittest
+from datetime import timedelta
 
 from ghwatch import normalize, poller, repos, store
 from ghwatch.github import Response
 from tests.helpers import memdb
 
+# Event times relative to now: the store drops anything past the 30-day
+# retention, so fixed dates turn into failures once they age out.
+_BASE = store.utcnow().replace(microsecond=0) - timedelta(days=1)
 
-def notif(id_, reason="mention", updated="2026-11-05T10:00:00Z"):
+
+def ts(minutes=0):
+    return (_BASE + timedelta(minutes=minutes)).strftime(store.TS_FORMAT)
+
+
+def notif(id_, reason="mention", updated=ts()):
     return {"id": id_, "updated_at": updated, "reason": reason,
             "subject": {"type": "Issue", "title": "t", "url": None},
             "repository": {"full_name": "acme/app", "html_url": "https://github.com/acme/app"}}
@@ -102,7 +111,7 @@ class PollOnceTest(unittest.TestCase):
     def test_tracked_repos_are_polled_with_their_own_etag(self):
         repos.track(self.conn, "Other/Lib", "a")
         push = {"id": "77", "type": "PushEvent", "actor": {"login": "bob"},
-                "repo": {"name": "other/lib"}, "created_at": "2026-11-05T10:00:00Z",
+                "repo": {"name": "other/lib"}, "created_at": ts(),
                 "payload": {"ref": "refs/heads/main", "size": 1}}
         gh = self.gh(**{"/repos/other/lib/events": ok([push], ETag="L1")})
         new, _ = poller.poll_once(self.conn, gh, "me")
@@ -124,14 +133,14 @@ class PollOnceTest(unittest.TestCase):
                     "payload": {"action": "opened", "number": 1, "pull_request": {"number": 1}}}
 
         live = "9999-01-01T00:00:00Z"  # created after tracking started
-        gh = self.gh(**{"/repos/other/lib/events": ok([ev("old", "2026-10-13T09:00:00Z"), ev("live", live)],
+        gh = self.gh(**{"/repos/other/lib/events": ok([ev("old", ts(-60)), ev("live", live)],
                                                      ETag="L1")})
         poller.poll_once(self.conn, gh, "me")
         self.assertEqual(store.get_event(self.conn, "e:old")["backfill"], 1)
         self.assertEqual(store.get_event(self.conn, "e:live")["backfill"], 0)
-        self.assertLess("2026-10-13T09:00:00Z", tracked_at)
+        self.assertLess(ts(-60), tracked_at)
         # later syncs (ETag known) are never backfill
-        gh2 = self.gh(**{"/repos/other/lib/events": ok([ev("later", "2026-10-14T00:00:00Z")], ETag="L2")})
+        gh2 = self.gh(**{"/repos/other/lib/events": ok([ev("later", ts())], ETag="L2")})
         poller.poll_once(self.conn, gh2, "me")
         self.assertEqual(store.get_event(self.conn, "e:later")["backfill"], 0)
 
@@ -157,7 +166,7 @@ class PollOnceTest(unittest.TestCase):
         self.assertEqual(poller.poll_once(self.conn, gh, "me")[1], 180)
 
 
-def push(id_, created="2026-11-05T10:00:00Z"):
+def push(id_, created=ts()):
     return {"id": id_, "type": "PushEvent", "actor": {"login": "bob"}, "repo": {"name": "acme/app"},
             "created_at": created, "payload": {"ref": "refs/heads/main"}}
 
@@ -198,12 +207,12 @@ class PaginationTest(unittest.TestCase):
         self.assertEqual((new, requests), (1, 1))
 
     def test_inserted_oldest_first_across_pages(self):
-        self.poll_own([page([push("b", "2026-11-05T10:02:00Z")], 2),
-                       page([push("a", "2026-11-05T10:01:00Z")])])
+        self.poll_own([page([push("b", ts(2))], 2),
+                       page([push("a", ts(1))])])
         self.assertEqual([r["id"] for r in store.events_after(self.conn, 0)], ["e:a", "e:b"])
 
     def test_notifications_paginate(self):
-        n2 = dict(notif("2"), updated_at="2026-11-05T09:00:00Z")
+        n2 = dict(notif("2"), updated_at=ts(-60))
         gh = FakeGitHub({"/notifications": [ok([notif("1")], Link='<https://api.github.com/notifications?page=2>; rel="next"'),
                                             ok([n2])],
                          "/users/me/received_events": NOT_MODIFIED, "/users/me/events": NOT_MODIFIED})
