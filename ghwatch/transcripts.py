@@ -22,12 +22,18 @@ MAX_REPORTED = 5000
 # Exact text watch emits; docs mention the marker but never this phrase.
 STALE = "GHWATCH-STALE no successful poll"
 
-# Output that can only come from ghwatch going wrong.
+# Output that can only come from ghwatch going wrong. Each is anchored to the
+# start of a line, as ghwatch prints it: a session that shows ghwatch's source
+# (`head bin/ghwatch; ghwatch consumers`) has these strings mid-line, inside
+# echo/print/raise calls, and must not be reported.
 GHWATCH_FAILURE = (
-    r"Traceback \(most recent call last\)|" + STALE + r"|^\S*ghwatch[^:\n]*: error:|"
-    r"\S*ghwatch[^:\n]*: (?:command not found|No such file)|ghwatch: no Python environment|"
-    r"database is locked|not an owner/name|unknown filter|bad --exclude rule|"
-    r"not found on GitHub|no such event:|did not stop|did not take over|could not mark")
+    r"^Traceback \(most recent call last\)|^" + STALE + r"|"
+    r"^\S*ghwatch[^:\n]*: error:|"                                   # argparse
+    r"^(?:\S+: )?\S*ghwatch: (?:command not found|No such file)|"  # shell
+    r"^ghwatch: (?:no Python environment|unknown filter|bad --exclude rule|.* not found on GitHub)|"
+    r"^\S+: not an owner/name|^no such event:|^\s+could not mark GitHub thread|"
+    r"^poller: .*did not (?:stop|take over)|^installed .*did not take over|"
+    r"^[\w.]*Error: database is locked")
 # Generic failure signs. In a chained command (`ghwatch done X; grep ...`)
 # these may come from the other commands, so they only count when ghwatch
 # ran on its own.
